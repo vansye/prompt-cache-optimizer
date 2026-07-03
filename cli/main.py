@@ -190,7 +190,8 @@ def cmd_diagnose(args):
 def cmd_proxy(args):
     """Start the local transparent proxy."""
     from cli.proxy import run_proxy
-    run_proxy(host=args.host, port=args.port)
+    run_proxy(host=args.host, port=args.port, upstream=args.upstream or None,
+              provider=args.provider or None)
 
 
 def cmd_stats(args):
@@ -280,6 +281,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_proxy.add_argument(
         "--port", "-p", type=int, default=9999,
         help="Bind port (default: 9999)")
+    p_proxy.add_argument(
+        "--upstream", "-u", default="",
+        help="Upstream API base URL (default: auto-detect from request path)")
+    p_proxy.add_argument(
+        "--provider", default="",
+        help="Provider for optimization logic (deepseek, anthropic, openai). "
+             "Required when --upstream is set.")
 
     # stats
     p_stats = sub.add_parser(
