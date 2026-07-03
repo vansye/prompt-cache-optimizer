@@ -1,0 +1,22 @@
+[
+  {
+    "role": "user",
+    "content": "{\"z\": 1, \"a\": 2}\r\n"
+  },
+  {
+    "role": "system",
+    "content": "You are a helpful assistant.\r\nBe concise.\r\n\r\n\r\n\r\nAlways respond in JSON."
+  },
+  {
+    "role": "user",
+    "content": "Show me a list of projects."
+  },
+  {
+    "role": "assistant",
+    "content": "{\"projects\": [{\"name\": \"Alpha\", \"status\": \"active\"}]}"
+  },
+  {
+    "role": "user",
+    "content": "Add one more."
+  }
+]
