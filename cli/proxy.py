@@ -11,6 +11,7 @@ Usage:
 
 import json
 import logging
+import os
 import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
@@ -291,24 +292,57 @@ def run_proxy(host: str = "127.0.0.1", port: int = 9999,
               provider: str | None = None):
     """Start the proxy server.
 
+    Auto-detects upstream and provider from environment variables
+    when not explicitly set:
+
+    Upstream detection order:
+      1. ``upstream`` parameter (--upstream CLI flag)
+      2. ``POPT_UPSTREAM`` env var
+      3. ``ANTHROPIC_BASE_URL`` env var
+      4. ``OPENAI_BASE_URL`` env var
+
+    Provider detection:
+      1. ``provider`` parameter (--provider CLI flag)
+      2. ``POPT_PROVIDER`` env var
+      3. Inferred from upstream URL (deepseek.com → deepseek)
+
     Args:
         host: Bind address (default: 127.0.0.1).
         port: Bind port (default: 9999).
-        upstream: Optional custom upstream URL. If set, all requests are
-                 forwarded here instead of auto-detecting from path.
-        provider: Provider for optimization logic (deepseek, anthropic, openai).
-                 Required when --upstream is set to ensure correct cache config.
+        upstream: Custom upstream URL. Overrides env auto-detection.
+        provider: Provider for optimization logic. Overrides env/inference.
     """
-    set_custom_upstream(upstream)
+    # ── Auto-detect upstream ────────────────────────────────────
+    if not upstream:
+        upstream = (os.environ.get("POPT_UPSTREAM")
+                    or os.environ.get("ANTHROPIC_BASE_URL")
+                    or os.environ.get("OPENAI_BASE_URL")
+                    or "")
+
+    # ── Auto-detect provider ─────────────────────────────────────
+    if not provider:
+        provider = os.environ.get("POPT_PROVIDER", "")
+    if not provider and upstream:
+        u = upstream.lower()
+        if "deepseek" in u:
+            provider = "deepseek"
+        elif "anthropic" in u:
+            provider = "anthropic"
+        elif "openai" in u:
+            provider = "openai"
+
+    set_custom_upstream(upstream or None)
     if provider:
         set_custom_provider(provider)
+
     server = ThreadedProxyServer((host, port), ProxyHandler)
     print(f"\n  popt proxy running on http://{host}:{port}")
     if upstream:
         print(f"  Upstream: {upstream}")
-        print(f"  Optimizer: {provider or 'auto (detect from path)'}")
+    if provider:
+        print(f"  Optimizer: {provider} ({128 if provider == 'deepseek' else 1024}t blocks)")
     else:
-        print(f"  Set ANTHROPIC_BASE_URL=http://{host}:{port} to use")
+        print(f"  Set ANTHROPIC_BASE_URL or use --upstream to enable optimization")
     print(f"  Press Ctrl+C to stop\n")
 
     try:

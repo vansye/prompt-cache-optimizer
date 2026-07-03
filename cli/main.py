@@ -194,6 +194,63 @@ def cmd_proxy(args):
               provider=args.provider or None)
 
 
+def cmd_run(args):
+    """Run a command with the popt proxy automatically in front.
+
+    Starts the proxy on a random port, sets the relevant env vars
+    (OPENAI_BASE_URL, ANTHROPIC_BASE_URL) to point to it, then
+    executes the target command.  When the command exits the proxy
+    is shut down automatically.
+
+    Usage:
+        popt run -- python my_script.py
+        popt run --provider deepseek -- python my_script.py
+    """
+    import subprocess
+    from cli.proxy import run_proxy, ProxyHandler, ThreadedProxyServer
+
+    # Pick a free port
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        proxy_port = s.getsockname()[1]
+
+    # Detect upstream from existing env
+    upstream = (args.upstream
+                or os.environ.get("POPT_UPSTREAM")
+                or os.environ.get("ANTHROPIC_BASE_URL")
+                or os.environ.get("OPENAI_BASE_URL")
+                or "")
+    provider = (args.provider
+                or os.environ.get("POPT_PROVIDER", ""))
+
+    # Start the proxy
+    from threading import Thread
+    server = ThreadedProxyServer(("127.0.0.1", proxy_port), ProxyHandler)
+    t = Thread(target=server.serve_forever, daemon=True)
+    t.start()
+
+    # Set env vars so the child process uses the proxy
+    child_env = os.environ.copy()
+    if "/v1" in upstream or "openai" in upstream.lower():
+        child_env["OPENAI_BASE_URL"] = f"http://127.0.0.1:{proxy_port}/v1"
+    if "/v1/messages" in upstream or "anthropic" in upstream.lower():
+        child_env["ANTHROPIC_BASE_URL"] = f"http://127.0.0.1:{proxy_port}"
+
+    print(f"\n  popt run — proxy on :{proxy_port}")
+    print(f"  Upstream: {upstream or '(none, passthrough only)'}")
+    print(f"  Command: {' '.join(args.command)}")
+    print(f"  {'='*40}\n")
+
+    try:
+        result = subprocess.run(args.command, env=child_env)
+        sys.exit(result.returncode)
+    except KeyboardInterrupt:
+        print("\n  Interrupted, shutting down...")
+    finally:
+        server.shutdown()
+
+
 def cmd_stats(args):
     """Analyze cache metrics from a log file or stdin."""
     if args.file:
@@ -283,11 +340,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Bind port (default: 9999)")
     p_proxy.add_argument(
         "--upstream", "-u", default="",
-        help="Upstream API base URL (default: auto-detect from request path)")
+        help="Upstream API base URL (default: auto-detect from env vars)")
     p_proxy.add_argument(
         "--provider", default="",
         help="Provider for optimization logic (deepseek, anthropic, openai). "
              "Required when --upstream is set.")
+
+    # run
+    p_run = sub.add_parser(
+        "run", help="Run a command with popt proxy automatically in front")
+    p_run.add_argument(
+        "--upstream", "-u", default="",
+        help="Upstream API base URL (default: auto-detect from env vars)")
+    p_run.add_argument(
+        "--provider", default="",
+        help="Provider for optimization logic")
+    p_run.add_argument(
+        "command", nargs=argparse.REMAINDER,
+        help="Command to run (prefix with -- to separate from popt args)")
 
     # stats
     p_stats = sub.add_parser(
@@ -308,6 +378,8 @@ def main():
         cmd_diagnose(args)
     elif args.command == "proxy":
         cmd_proxy(args)
+    elif args.command == "run":
+        cmd_run(args)
     elif args.command == "stats":
         cmd_stats(args)
     else:
