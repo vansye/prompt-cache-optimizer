@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "poptimize"
-version = "0.2.1"
+version = "0.3.0"
 description = "Prompt structure optimizer — maximize LLM API cache hit rates without changing semantics"
 authors = [{name = "Prompt Optimizer contributors"}]
 readme = "README.md"
@@ -32,3 +32,6 @@ popt = "cli.main:main"
 
 [tool.setuptools.packages.find]
 include = ["optimizer*", "cli*"]
+
+[tool.setuptools.package-data]
+optimizer = ["providers.json"]

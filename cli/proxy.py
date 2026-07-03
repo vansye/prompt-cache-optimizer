@@ -1,4 +1,4 @@
-"""Local HTTP proxy — transparent prompt optimization.
+"""Local HTTP proxy -- transparent prompt optimization.
 
 Listens on localhost, accepts API requests, optimizes the prompt
 structure, and forwards to the real API provider.
@@ -23,6 +23,7 @@ from optimizer import optimize
 from optimizer.config import PROVIDER_CONFIGS
 
 logger = logging.getLogger("popt-proxy")
+logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 
 # ── Upstream routing ────────────────────────────────────────────────────
 
@@ -55,6 +56,9 @@ HOP_BY_HOP = frozenset({
     "transfer-encoding", "upgrade",
 })
 
+# Headers that must be recomputed when the body changes
+BODY_DEPENDENT = frozenset({"content-length", "content-encoding"})
+
 
 def _detect_provider(path: str) -> str:
     """Detect API provider from the request path."""
@@ -67,10 +71,16 @@ def _detect_provider(path: str) -> str:
 
 
 def _forward_headers(headers: dict) -> dict:
-    """Forward headers, stripping hop-by-hop headers."""
+    """Forward headers, stripping hop-by-hop and body-dependent headers.
+
+    Content-Length and Content-Encoding are stripped because the
+    proxy replaces the request body (adding padding), so the original
+    values are wrong for the forwarded request.  urllib will recompute
+    Content-Length automatically from the ``data`` parameter.
+    """
     return {
         k: v for k, v in headers.items()
-        if k.lower() not in HOP_BY_HOP
+        if k.lower() not in HOP_BY_HOP and k.lower() not in BODY_DEPENDENT
     }
 
 
@@ -83,6 +93,15 @@ def _forward_streaming(upstream_resp, handler):
     Reads chunks from upstream as they arrive and writes them
     immediately to the client response stream.
     """
+    import socket as _socket
+    # Set a read timeout on the underlying socket so we don't hang forever
+    # if the upstream connection stalls mid-stream.
+    try:
+        if hasattr(upstream_resp, "fp") and hasattr(upstream_resp.fp, "raw"):
+            upstream_resp.fp.raw._sock.settimeout(120)
+    except (AttributeError, OSError):
+        pass
+
     try:
         while True:
             chunk = upstream_resp.read(4096)
@@ -92,6 +111,8 @@ def _forward_streaming(upstream_resp, handler):
             handler.wfile.flush()
     except (BrokenPipeError, ConnectionResetError):
         logger.warning("Client disconnected during streaming")
+    except _socket.timeout:
+        logger.warning("Streaming read timed out (upstream stalled)")
     except Exception as e:
         logger.error(f"Streaming error: {e}")
 
@@ -114,7 +135,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
         """
         if _custom_upstream:
             provider = _detect_provider(path)
-            return f"{_custom_upstream.rstrip('/')}{path}", provider
+            base = _custom_upstream.rstrip("/")
+            # Prevent double-path: if the base already contains the path suffix
+            # (e.g. "/v1/messages" in base URL), don't append it again.
+            if path and base.endswith(path):
+                return base, provider
+            return f"{base}{path}", provider
 
         provider = _detect_provider(path)
         upstream = UPSTREAMS.get(provider)
@@ -144,7 +170,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
-        """Handle POST request — optimize and forward."""
+        """Handle POST request -- optimize and forward."""
         start_time = time.time()
 
         # ── Read request body ──────────────────────────────────────
@@ -194,12 +220,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 opt_tokens = len(json.dumps(optimized_messages)) // 4
                 logger.info(
                     f"OPTIMIZE | {provider} | "
-                    f"{len(messages)}→{len(optimized_messages)} msgs | "
-                    f"~{orig_tokens}→~{opt_tokens} tokens"
+                    f"{len(messages)}->{len(optimized_messages)} msgs | "
+                    f"~{orig_tokens}->~{opt_tokens} tokens"
                 )
             except Exception as e:
                 logger.error(f"Optimization failed (forwarding raw): {e}")
-                # Forward raw — better than failing
+                # Forward raw -- better than failing
 
         # ── Detect streaming ───────────────────────────────────────
         is_streaming = request_data.get("stream", False)
@@ -223,7 +249,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
 
-                elapsed = time.time() - start_time
+                # Set socket timeout so streaming reads don't hang forever
+                if hasattr(self, "requestline"):
+                    pass  # BaseHTTPRequestHandler doesn't expose the socket directly
                 _forward_streaming(resp, self)
                 elapsed_total = time.time() - start_time
                 logger.info(
@@ -248,7 +276,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 )
 
         except HTTPError as e:
-            # API returned an error — forward it
+            # API returned an error -- forward it
             err_body = e.read()
             elapsed = time.time() - start_time
             logger.warning(
@@ -289,7 +317,8 @@ class ThreadedProxyServer(ThreadingMixIn, HTTPServer):
 
 def run_proxy(host: str = "127.0.0.1", port: int = 9999,
               upstream: str | None = None,
-              provider: str | None = None):
+              provider: str | None = None,
+              api_format: str | None = None):
     """Start the proxy server.
 
     Auto-detects upstream and provider from environment variables
@@ -304,14 +333,18 @@ def run_proxy(host: str = "127.0.0.1", port: int = 9999,
     Provider detection:
       1. ``provider`` parameter (--provider CLI flag)
       2. ``POPT_PROVIDER`` env var
-      3. Inferred from upstream URL (deepseek.com → deepseek)
+      3. Inferred from upstream URL
 
     Args:
         host: Bind address (default: 127.0.0.1).
         port: Bind port (default: 9999).
         upstream: Custom upstream URL. Overrides env auto-detection.
         provider: Provider for optimization logic. Overrides env/inference.
+        api_format: ``"openai"`` or ``"anthropic"``. Inferred from
+                    provider if not set.
     """
+    from optimizer.config import infer_provider_from_url
+
     # ── Auto-detect upstream ────────────────────────────────────
     if not upstream:
         upstream = (os.environ.get("POPT_UPSTREAM")
@@ -323,13 +356,15 @@ def run_proxy(host: str = "127.0.0.1", port: int = 9999,
     if not provider:
         provider = os.environ.get("POPT_PROVIDER", "")
     if not provider and upstream:
-        u = upstream.lower()
-        if "deepseek" in u:
-            provider = "deepseek"
-        elif "anthropic" in u:
-            provider = "anthropic"
-        elif "openai" in u:
-            provider = "openai"
+        inferred = infer_provider_from_url(upstream)
+        if inferred:
+            provider = inferred
+
+    # ── Auto-detect api_format ──────────────────────────────────
+    if not api_format:
+        from optimizer.config import get_config
+        cfg = get_config(provider or "")
+        api_format = getattr(cfg, "api_format", "openai")
 
     set_custom_upstream(upstream or None)
     if provider:
@@ -337,12 +372,40 @@ def run_proxy(host: str = "127.0.0.1", port: int = 9999,
 
     server = ThreadedProxyServer((host, port), ProxyHandler)
     print(f"\n  popt proxy running on http://{host}:{port}")
-    if upstream:
+    print(f"  {'='*45}")
+    if upstream and provider:
+        from optimizer.config import get_config
+        cfg = get_config(provider)
+        block_size = cfg.cache_threshold
+        print(f"  [OK] Upstream: {upstream}")
+        print(f"  [OK] Provider: {provider} ({block_size}t cache blocks, {api_format} API)")
+        print(f"")
+        print(f"  Point your AI client to this proxy:")
+        if api_format == "anthropic":
+            print(f"    $env:ANTHROPIC_BASE_URL = 'http://{host}:{port}'")
+        else:
+            print(f"    $env:OPENAI_BASE_URL    = 'http://{host}:{port}/v1'")
+        print(f"")
+        print(f"  Then run your AI tool normally:")
+        print(f"    claude")
+        print(f"    python your_script.py")
+    elif upstream:
         print(f"  Upstream: {upstream}")
-    if provider:
-        print(f"  Optimizer: {provider} ({128 if provider == 'deepseek' else 1024}t blocks)")
+        print(f"  [!] No provider detected -- set POPT_PROVIDER or use --provider")
+        print(f"      Provider options: deepseek, anthropic, openai")
     else:
-        print(f"  Set ANTHROPIC_BASE_URL or use --upstream to enable optimization")
+        print(f"  [!] No upstream detected")
+        print(f"")
+        print(f"  Auto-detection order (set any one):")
+        print(f"    1. --upstream CLI flag")
+        print(f"    2. POPT_UPSTREAM env var")
+        print(f"    3. ANTHROPIC_BASE_URL env var")
+        print(f"    4. OPENAI_BASE_URL env var")
+        print(f"")
+        print(f"  Examples:")
+        print(f"    $env:ANTHROPIC_BASE_URL = 'https://api.deepseek.com/anthropic'")
+        print(f"    python -m cli.main proxy --upstream https://api.deepseek.com/anthropic --provider deepseek")
+    print(f"  {'='*45}")
     print(f"  Press Ctrl+C to stop\n")
 
     try:

@@ -4,12 +4,16 @@ Each provider has different:
 - Cache threshold (minimum prefix tokens to enable caching)
 - Cache tag format (how to mark cache breakpoints)
 - Message format (roles, content structure)
+- API format (openai vs anthropic)
 
-Adding a new provider = adding an entry here.
-No core code changes needed.
+Providers are loaded from ``providers.json`` at import time.
+Additional providers can be registered at runtime via ``register_provider()``.
 """
 
+import json
+import os
 from dataclasses import dataclass, field
+from fnmatch import fnmatch
 from typing import Optional
 
 # ── Provider Configuration ──────────────────────────────────────────────
@@ -27,6 +31,7 @@ class ProviderConfig:
         cache_tag_system: Whether to add cache tag to system message.
         cache_tag_message: Whether the provider adds cache tags to non-system messages.
         separator: Default segment separator.
+        api_format: API protocol format ("openai" or "anthropic").
     """
     name: str
     cache_threshold: int = 1024
@@ -35,39 +40,153 @@ class ProviderConfig:
     cache_tag_system: bool = False
     cache_tag_message: bool = False
     separator: str = "\n\n---\n\n"
+    api_format: str = "openai"
 
 
-# ── Built-in Providers ─────────────────────────────────────────────────
+@dataclass
+class ModelInfo:
+    """Resolved model information from the registry.
 
-PROVIDER_CONFIGS: dict[str, ProviderConfig] = {
-    "anthropic": ProviderConfig(
-        name="anthropic",
-        cache_threshold=1024,
-        supports_breakpoints=True,
-        default_model="claude-sonnet-5-20250601",
-        cache_tag_system=True,
-        cache_tag_message=True,
-        separator="\n\n---\n\n",
-    ),
-    "openai": ProviderConfig(
-        name="openai",
-        cache_threshold=1025,
-        supports_breakpoints=False,
-        default_model="gpt-4o",
-        cache_tag_system=False,
-        cache_tag_message=False,
-        separator="\n\n---\n\n",
-    ),
-    "deepseek": ProviderConfig(
-        name="deepseek",
-        cache_threshold=128,
-        supports_breakpoints=False,
-        default_model="deepseek-v4-flash",
-        cache_tag_system=False,
-        cache_tag_message=False,
-        separator="\n\n---\n\n",
-    ),
-}
+    Attributes:
+        provider: Provider name (matches a ProviderConfig key).
+        base_url: API base URL for this model.
+        api_format: API protocol format ("openai" or "anthropic").
+        model_name: Original model name to pass to the API.
+    """
+    provider: str
+    base_url: str | None
+    api_format: str
+    model_name: str | None = None
+
+
+# ── Provider Registry (loaded from providers.json) ──────────────────────
+
+_RAW_PROVIDER_REGISTRY: list[dict] = []
+
+
+def load_providers() -> list[dict]:
+    """Load provider registry from the bundled providers.json file.
+
+    Returns a list of raw dict entries (each has name, api_format,
+    base_url, model_patterns, and config sub-dict).
+    """
+    global _RAW_PROVIDER_REGISTRY
+    if _RAW_PROVIDER_REGISTRY:
+        return _RAW_PROVIDER_REGISTRY
+
+    path = os.path.join(os.path.dirname(__file__), "providers.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        _RAW_PROVIDER_REGISTRY = data.get("providers", [])
+    except (FileNotFoundError, json.JSONDecodeError):
+        _RAW_PROVIDER_REGISTRY = []
+    return _RAW_PROVIDER_REGISTRY
+
+
+def resolve_model(model_name: str) -> ModelInfo | None:
+    """Look up a model name in the provider registry.
+
+    Uses glob pattern matching (``fnmatch``) against each provider's
+    ``model_patterns``.  Exact matches take priority over wildcard
+    matches; the first matching provider wins for each category.
+
+    Args:
+        model_name: e.g. "deepseek-v4-flash", "gpt-4o", "llama-3-70b"
+
+    Returns:
+        A ``ModelInfo`` with the resolved provider, base URL, and
+        API format, or ``None`` if no match is found.
+    """
+    providers = load_providers()
+    if not providers:
+        return None
+
+    # Pass 1: exact match
+    for entry in providers:
+        for pattern in entry.get("model_patterns", []):
+            if pattern == model_name:
+                return ModelInfo(
+                    provider=entry["name"],
+                    base_url=entry.get("base_url"),
+                    api_format=entry.get("api_format", "openai"),
+                    model_name=model_name,
+                )
+
+    # Pass 2: wildcard match
+    for entry in providers:
+        for pattern in entry.get("model_patterns", []):
+            if fnmatch(model_name, pattern):
+                return ModelInfo(
+                    provider=entry["name"],
+                    base_url=entry.get("base_url"),
+                    api_format=entry.get("api_format", "openai"),
+                    model_name=model_name,
+                )
+
+    return None
+
+
+def infer_provider_from_url(upstream: str) -> str | None:
+    """Infer a provider name from an upstream URL domain.
+
+    Checks known domain patterns; returns ``None`` if unidentified.
+    """
+    u = upstream.lower()
+    if "deepseek" in u:
+        return "deepseek"
+    if "anthropic" in u:
+        return "anthropic"
+    if "openai" in u or "azure.com" in u:
+        return "openai"
+    if "groq" in u:
+        return "groq"
+    if "together" in u:
+        return "together"
+    if "mistral" in u:
+        return "mistral"
+    if "fireworks" in u:
+        return "fireworks"
+    if "x.ai" in u:
+        return "xai"
+    if "perplexity" in u:
+        return "perplexity"
+    if "githubcopilot" in u or "copilot" in u:
+        return "github-copilot"
+    if "openrouter" in u:
+        return "openrouter"
+    if "googleapis" in u or "generativelanguage" in u:
+        return "google-gemini"
+    return None
+
+
+# ── Built-in Providers (legacy, now loaded from JSON) ───────────────────
+
+PROVIDER_CONFIGS: dict[str, ProviderConfig] = {}
+
+
+def _build_configs() -> dict[str, ProviderConfig]:
+    """Build ``PROVIDER_CONFIGS`` from the JSON registry.
+
+    Called once at module import time.  Merges with any legacy
+    entries that may have been registered by user code.
+    """
+    configs = {}
+    for entry in load_providers():
+        name = entry["name"]
+        cfg_data = entry.get("config", {})
+        cfg = ProviderConfig(
+            name=name,
+            api_format=entry.get("api_format", "openai"),
+            **cfg_data,
+        )
+        configs[name] = cfg
+    return configs
+
+
+# Overridable by user code via register_provider()
+PROVIDER_CONFIGS = _build_configs()
+
 
 # ── Message Type Helpers ───────────────────────────────────────────────
 
@@ -98,10 +217,10 @@ def register_provider(name: str, **overrides) -> ProviderConfig:
 
     Args:
         name: Provider identifier.
-        **overrides: Any ProviderConfig field to override.
+        **overrides: Any ``ProviderConfig`` field to override.
 
     Returns:
-        The newly created ProviderConfig.
+        The newly created ``ProviderConfig``.
     """
     cfg = ProviderConfig(name=name, **overrides)
     PROVIDER_CONFIGS[name] = cfg

@@ -1,0 +1,154 @@
+{
+  "providers": [
+    {
+      "name": "deepseek",
+      "api_format": "anthropic",
+      "base_url": "https://api.deepseek.com/anthropic",
+      "alt_base_url": "https://api.deepseek.com",
+      "model_patterns": ["deepseek-*"],
+      "config": {
+        "cache_threshold": 128,
+        "supports_breakpoints": false,
+        "default_model": "deepseek-chat",
+        "cache_tag_system": false,
+        "cache_tag_message": false
+      }
+    },
+    {
+      "name": "anthropic",
+      "api_format": "anthropic",
+      "base_url": "https://api.anthropic.com",
+      "model_patterns": ["claude-*"],
+      "config": {
+        "cache_threshold": 1024,
+        "supports_breakpoints": true,
+        "default_model": "claude-sonnet-5-20250601",
+        "cache_tag_system": true,
+        "cache_tag_message": true
+      }
+    },
+    {
+      "name": "openai",
+      "api_format": "openai",
+      "base_url": "https://api.openai.com",
+      "model_patterns": ["gpt-*", "o1-*", "o3-*"],
+      "config": {
+        "cache_threshold": 1025,
+        "supports_breakpoints": false,
+        "default_model": "gpt-4o",
+        "cache_tag_system": false,
+        "cache_tag_message": false
+      }
+    },
+    {
+      "name": "groq",
+      "api_format": "openai",
+      "base_url": "https://api.groq.com/openai/v1",
+      "model_patterns": ["llama-*", "mixtral-*", "deepseek-r1-*", "gemma-*", "qwen-*"],
+      "config": {
+        "cache_threshold": 128,
+        "supports_breakpoints": false,
+        "default_model": "llama-3.3-70b-versatile"
+      }
+    },
+    {
+      "name": "together",
+      "api_format": "openai",
+      "base_url": "https://api.together.xyz/v1",
+      "model_patterns": ["together-*", "mistralai/*", "meta-llama/*"],
+      "config": {
+        "cache_threshold": 128,
+        "supports_breakpoints": false,
+        "default_model": "mistralai/Mixtral-8x22B-Instruct-v0.1"
+      }
+    },
+    {
+      "name": "mistral",
+      "api_format": "openai",
+      "base_url": "https://api.mistral.ai/v1",
+      "model_patterns": ["mistral-*", "open-mistral-*", "codestral-*", "pixtral-*"],
+      "config": {
+        "cache_threshold": 128,
+        "supports_breakpoints": false,
+        "default_model": "mistral-large-latest"
+      }
+    },
+    {
+      "name": "fireworks",
+      "api_format": "openai",
+      "base_url": "https://api.fireworks.ai/inference/v1",
+      "model_patterns": ["accounts/fireworks-*"],
+      "config": {
+        "cache_threshold": 128,
+        "supports_breakpoints": false,
+        "default_model": "accounts/fireworks/models/llama-v3p3-70b-instruct"
+      }
+    },
+    {
+      "name": "xai",
+      "api_format": "openai",
+      "base_url": "https://api.x.ai",
+      "model_patterns": ["grok-*"],
+      "config": {
+        "cache_threshold": 128,
+        "supports_breakpoints": false,
+        "default_model": "grok-beta"
+      }
+    },
+    {
+      "name": "perplexity",
+      "api_format": "openai",
+      "base_url": "https://api.perplexity.ai",
+      "model_patterns": ["sonar-*", "pplx-*"],
+      "config": {
+        "cache_threshold": 128,
+        "supports_breakpoints": false,
+        "default_model": "sonar-pro"
+      }
+    },
+    {
+      "name": "github-copilot",
+      "api_format": "openai",
+      "base_url": "https://api.githubcopilot.com",
+      "model_patterns": ["copilot-*", "codex-*"],
+      "config": {
+        "cache_threshold": 128,
+        "supports_breakpoints": false,
+        "default_model": "copilot-gpt-4"
+      }
+    },
+    {
+      "name": "openrouter",
+      "api_format": "openai",
+      "base_url": "https://openrouter.ai/api/v1",
+      "model_patterns": ["openrouter/*"],
+      "config": {
+        "cache_threshold": 128,
+        "supports_breakpoints": false,
+        "default_model": "openrouter/auto"
+      }
+    },
+    {
+      "name": "azure-openai",
+      "api_format": "openai",
+      "base_url": null,
+      "model_patterns": ["azure-*"],
+      "config": {
+        "cache_threshold": 1025,
+        "supports_breakpoints": false,
+        "default_model": "azure-gpt-4"
+      }
+    },
+    {
+      "name": "google-gemini",
+      "api_format": "openai",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta",
+      "model_patterns": ["gemini-*"],
+      "config": {
+        "cache_threshold": 128,
+        "supports_breakpoints": false,
+        "default_model": "gemini-2.0-flash"
+      }
+    }
+  ]
+}

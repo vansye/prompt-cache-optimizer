@@ -38,12 +38,12 @@ class Formatter:
         cleaned = self._strip_internal(messages)
 
         # Provider-specific formatting
-        if cfg.name == "anthropic":
+        if cfg.api_format == "anthropic":
             return self._format_anthropic(cleaned)
-        elif cfg.name == "openai":
+        elif cfg.api_format == "openai":
             return self._format_openai(cleaned)
         else:
-            # Unknown provider: just strip internal markers
+            # Unknown format: just strip internal markers
             return cleaned
 
     @staticmethod

@@ -1,10 +1,10 @@
 """CLI entry point for popt.
 
 Usage:
-    popt preview <file>                  — Show optimization diff (no API call)
-    popt diagnose <a.json> <b.json>      — Diagnose why two requests differ
-    popt proxy [--port PORT]             — Start local transparent proxy
-    popt stats [<file>]                  — Analyze cache metrics from log
+    popt preview <file>                  -- Show optimization diff (no API call)
+    popt diagnose <a.json> <b.json>      -- Diagnose why two requests differ
+    popt proxy [--port PORT]             -- Start local transparent proxy
+    popt stats [<file>]                  -- Analyze cache metrics from log
 """
 
 import argparse
@@ -187,11 +187,82 @@ def cmd_diagnose(args):
     print()
 
 
+def _resolve_upstream_provider(
+    cli_upstream: str, cli_provider: str, cli_model: str,
+) -> tuple[str, str, str]:
+    """Resolve upstream URL, provider name, and API format from all sources.
+
+    Priority chain (highest first):
+      1. CLI flags (--upstream, --provider, --model)
+      2. Environment variables
+      3. .poptimerc config file
+      4. Registry inference from URL or model name
+      5. Built-in defaults
+
+    Returns:
+        Tuple of (upstream_url, provider_name, api_format).
+        ``api_format`` is ``"openai"`` or ``"anthropic"``.
+    """
+    from cli.rcconfig import load_config
+    from optimizer.config import resolve_model, infer_provider_from_url
+
+    # ── Step 1: Load .poptimerc ───────────────────────────────────
+    rcfg = load_config()
+
+    # ── Step 2: Resolve model name (if given) ─────────────────────
+    model_sources = [
+        cli_model,
+        os.environ.get("POPT_MODEL", ""),
+        rcfg.model,
+    ]
+    model_name = next((m for m in model_sources if m), "")
+    model_info = resolve_model(model_name) if model_name else None
+
+    # ── Step 3: Upstream detection ─────────────────────────────────
+    upstream = (
+        cli_upstream
+        or (model_info.base_url if model_info else None)
+        or os.environ.get("POPT_UPSTREAM")
+        or os.environ.get("ANTHROPIC_BASE_URL")
+        or os.environ.get("OPENAI_BASE_URL")
+        or rcfg.upstream
+        or ""
+    )
+
+    # ── Step 4: Provider detection ─────────────────────────────────
+    provider = (
+        cli_provider
+        or (model_info.provider if model_info else None)
+        or os.environ.get("POPT_PROVIDER", "")
+        or (infer_provider_from_url(upstream) if upstream else "")
+        or rcfg.provider
+        or ""
+    )
+
+    # ── Step 5: API format ─────────────────────────────────────────
+    # If model_info is available, use its api_format.
+    # Otherwise infer from provider name.
+    api_format = "openai"  # default
+    if model_info:
+        api_format = model_info.api_format
+    elif provider:
+        from optimizer.config import get_config
+        cfg = get_config(provider)
+        api_format = getattr(cfg, "api_format", "openai")
+
+    return upstream, provider, api_format
+
+
 def cmd_proxy(args):
     """Start the local transparent proxy."""
+    upstream, provider, api_format = _resolve_upstream_provider(
+        args.upstream or "", args.provider or "", args.model or "",
+    )
     from cli.proxy import run_proxy
-    run_proxy(host=args.host, port=args.port, upstream=args.upstream or None,
-              provider=args.provider or None)
+    run_proxy(host=args.host, port=args.port,
+              upstream=upstream or None,
+              provider=provider or None,
+              api_format=api_format)
 
 
 def cmd_run(args):
@@ -204,10 +275,11 @@ def cmd_run(args):
 
     Usage:
         popt run -- python my_script.py
-        popt run --provider deepseek -- python my_script.py
+        popt run --model deepseek-v4-flash -- claude
     """
     import subprocess
     from cli.proxy import run_proxy, ProxyHandler, ThreadedProxyServer
+    from cli.proxy import set_custom_upstream, set_custom_provider
 
     # Pick a free port
     import socket
@@ -215,14 +287,16 @@ def cmd_run(args):
         s.bind(("127.0.0.1", 0))
         proxy_port = s.getsockname()[1]
 
-    # Detect upstream from existing env
-    upstream = (args.upstream
-                or os.environ.get("POPT_UPSTREAM")
-                or os.environ.get("ANTHROPIC_BASE_URL")
-                or os.environ.get("OPENAI_BASE_URL")
-                or "")
-    provider = (args.provider
-                or os.environ.get("POPT_PROVIDER", ""))
+    # Resolve upstream + provider + api_format via new detection chain
+    upstream, provider, api_format = _resolve_upstream_provider(
+        args.upstream or "", args.provider or "", args.model or "",
+    )
+
+    # Configure the proxy with the detected upstream so it actually forwards
+    # to the right place (not the default api.anthropic.com / api.openai.com).
+    set_custom_upstream(upstream or None)
+    if provider:
+        set_custom_provider(provider)
 
     # Start the proxy
     from threading import Thread
@@ -231,19 +305,65 @@ def cmd_run(args):
     t.start()
 
     # Set env vars so the child process uses the proxy
+    # We set the correct env var based on api_format, which is more
+    # robust than guessing from the URL string.
     child_env = os.environ.copy()
-    if "/v1" in upstream or "openai" in upstream.lower():
+    if api_format == "openai":
         child_env["OPENAI_BASE_URL"] = f"http://127.0.0.1:{proxy_port}/v1"
-    if "/v1/messages" in upstream or "anthropic" in upstream.lower():
+    if api_format == "anthropic":
         child_env["ANTHROPIC_BASE_URL"] = f"http://127.0.0.1:{proxy_port}"
+    # Also set the other one on a best-effort basis from the upstream URL
+    if upstream:
+        u = upstream.lower()
+        if "/v1" in u or "openai" in u:
+            child_env["OPENAI_BASE_URL"] = f"http://127.0.0.1:{proxy_port}/v1"
+        if "/v1/messages" in u or "anthropic" in u:
+            child_env["ANTHROPIC_BASE_URL"] = f"http://127.0.0.1:{proxy_port}"
 
-    print(f"\n  popt run — proxy on :{proxy_port}")
-    print(f"  Upstream: {upstream or '(none, passthrough only)'}")
-    print(f"  Command: {' '.join(args.command)}")
-    print(f"  {'='*40}\n")
+    # Strip leading '--' if argparse REMAINDER collected it
+    cmd = args.cmd_args[:]
+    while cmd and cmd[0] == "--":
+        cmd.pop(0)
+
+    # ── Build a user-friendly status banner ─────────────────────────
+    banner = []
+    banner.append(f"  popt run -- proxy on :{proxy_port}")
+    banner.append(f"  {'='*45}")
+
+    if upstream and provider:
+        from optimizer.config import get_config
+        cfg = get_config(provider)
+        block_size = cfg.cache_threshold
+        banner.append(f"  [OK] Upstream: {upstream}")
+        banner.append(f"  [OK] Provider: {provider} ({block_size}t cache blocks, {api_format} API)")
+        # Show what env vars the child will see
+        if "ANTHROPIC_BASE_URL" in child_env and child_env["ANTHROPIC_BASE_URL"].startswith("http://127.0.0.1"):
+            banner.append(f"  -> ANTHROPIC_BASE_URL = http://127.0.0.1:{proxy_port}")
+        if "OPENAI_BASE_URL" in child_env and child_env["OPENAI_BASE_URL"].startswith("http://127.0.0.1"):
+            banner.append(f"  -> OPENAI_BASE_URL     = http://127.0.0.1:{proxy_port}/v1")
+        if args.model:
+            banner.append(f"  Model: {args.model}")
+    elif upstream:
+        banner.append(f"  Upstream: {upstream}")
+        banner.append(f"  [!] No provider detected -- set POPT_PROVIDER or --provider")
+    else:
+        banner.append(f"  [!] No upstream detected -- proxying only, NOT optimizing")
+        banner.append(f"")
+        banner.append(f"  To enable optimization, set an env var or --model:")
+        banner.append(f"    $env:ANTHROPIC_BASE_URL = 'https://api.deepseek.com/anthropic'")
+        banner.append(f"    $env:OPENAI_BASE_URL    = 'https://api.openai.com'")
+        banner.append(f"    --model deepseek-v4-flash")
+
+    banner.append(f"  Command: {' '.join(cmd)}")
+    banner.append(f"  {'='*45}\n")
+
+    print("\n".join(banner), flush=True)
 
     try:
-        result = subprocess.run(args.command, env=child_env)
+        # On Windows, use shell=True so batch files (*.cmd, *.bat) resolve
+        # via PATHEXT, just like typing in PowerShell/cmd.
+        use_shell = sys.platform == "win32"
+        result = subprocess.run(cmd, env=child_env, shell=use_shell)
         sys.exit(result.returncode)
     except KeyboardInterrupt:
         print("\n  Interrupted, shutting down...")
@@ -280,7 +400,7 @@ def cmd_stats(args):
 
     report = HitRatioCalculator.calculate(cache_entries)
 
-    print(f"\n  popt stats — {report.total_requests} requests")
+    print(f"\n  popt stats -- {report.total_requests} requests")
     print(f"  {'='*40}")
     print(f"  Total input tokens:   {report.total_input_tokens:,}")
     print(f"  Total cache created:  {report.total_cache_creation:,}")
@@ -299,7 +419,7 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the CLI argument parser."""
     parser = argparse.ArgumentParser(
         prog="popt",
-        description="Prompt structure optimizer — maximize LLM cache hit rates",
+        description="Prompt structure optimizer -- maximize LLM cache hit rates",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -331,7 +451,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # proxy
     p_proxy = sub.add_parser(
-        "proxy", help="Start local transparent proxy")
+        "proxy", help="Start local transparent proxy (auto-detect upstream from env)")
     p_proxy.add_argument(
         "--host", default="127.0.0.1",
         help="Bind address (default: 127.0.0.1)")
@@ -340,24 +460,33 @@ def build_parser() -> argparse.ArgumentParser:
         help="Bind port (default: 9999)")
     p_proxy.add_argument(
         "--upstream", "-u", default="",
-        help="Upstream API base URL (default: auto-detect from env vars)")
+        help="Upstream API base URL (default: auto-detect from ANTHROPIC_BASE_URL / OPENAI_BASE_URL / POPT_UPSTREAM)")
     p_proxy.add_argument(
         "--provider", default="",
-        help="Provider for optimization logic (deepseek, anthropic, openai). "
-             "Required when --upstream is set.")
+        help="Optimization logic: deepseek (128t blocks), anthropic (1024t), openai. "
+             "Auto-detected from upstream URL if not set.")
+    p_proxy.add_argument(
+        "--model", "-m", default="",
+        help="Model name (e.g. deepseek-v4-flash, gpt-4o). Auto-configures "
+             "upstream and provider from the built-in registry.")
 
     # run
     p_run = sub.add_parser(
-        "run", help="Run a command with popt proxy automatically in front")
+        "run", help="Start proxy + run any command (auto-detects upstream from env)")
     p_run.add_argument(
         "--upstream", "-u", default="",
-        help="Upstream API base URL (default: auto-detect from env vars)")
+        help="Upstream API base URL (default: auto-detect from ANTHROPIC_BASE_URL / OPENAI_BASE_URL / POPT_UPSTREAM)")
     p_run.add_argument(
         "--provider", default="",
-        help="Provider for optimization logic")
+        help="Optimization logic: deepseek (128t blocks), anthropic (1024t), openai")
     p_run.add_argument(
-        "command", nargs=argparse.REMAINDER,
-        help="Command to run (prefix with -- to separate from popt args)")
+        "--model", "-m", default="",
+        help="Model name (e.g. deepseek-v4-flash, gpt-4o). Auto-configures "
+             "upstream and provider from the built-in registry.")
+    p_run.add_argument(
+        "cmd_args", nargs=argparse.REMAINDER,
+        help="Command to run. Prefix with -- to separate from popt args. "
+             "Examples: 'run -- claude', 'run -- python script.py'")
 
     # stats
     p_stats = sub.add_parser(
