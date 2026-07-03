@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "poptimize"
-version = "0.3.0"
+version = "0.3.1"
 description = "Prompt structure optimizer — maximize LLM API cache hit rates without changing semantics"
 authors = [{name = "Prompt Optimizer contributors"}]
 readme = "README.md"
