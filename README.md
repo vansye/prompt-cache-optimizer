@@ -14,6 +14,8 @@ popt run --model deepseek-v4-flash -- node bot.js
 
 **核心能力**：popt 是一个 **HTTP 透明代理**，插在任何 AI 框架和 API 之间。内置 15+ 服务商预设（DeepSeek、OpenAI、Anthropic、Groq、Together、Codex…），一条命令切换模型。不需要改 SDK、不需要装插件。
 
+> 📖 **完整操作文档**：[docs/usage.md](docs/usage.md) — 从安装到实战的全部步骤
+
 ---
 
 ## 快速开始
