@@ -113,16 +113,22 @@ def resolve_model(model_name: str) -> ModelInfo | None:
                     model_name=model_name,
                 )
 
-    # Pass 2: wildcard match
+    # Pass 2: wildcard match — pick the most specific (longest) pattern
+    candidates: list[tuple[int, dict]] = []  # (pattern_length, entry)
     for entry in providers:
         for pattern in entry.get("model_patterns", []):
             if fnmatch(model_name, pattern):
-                return ModelInfo(
-                    provider=entry["name"],
-                    base_url=entry.get("base_url"),
-                    api_format=entry.get("api_format", "openai"),
-                    model_name=model_name,
-                )
+                candidates.append((len(pattern), entry))
+    if candidates:
+        # Sort by pattern length descending — longer pattern = more specific
+        candidates.sort(key=lambda x: -x[0])
+        best = candidates[0][1]
+        return ModelInfo(
+            provider=best["name"],
+            base_url=best.get("base_url"),
+            api_format=best.get("api_format", "openai"),
+            model_name=model_name,
+        )
 
     return None
 
@@ -131,32 +137,50 @@ def infer_provider_from_url(upstream: str) -> str | None:
     """Infer a provider name from an upstream URL domain.
 
     Checks known domain patterns; returns ``None`` if unidentified.
+    Uses **domain-first** matching so that path components like
+    ``/openai/`` don't cause false positives (e.g. ``api.groq.com/openai/v1``).
     """
     u = upstream.lower()
-    if "deepseek" in u:
+
+    # Extract domain (netloc) for reliable matching
+    from urllib.parse import urlparse
+    try:
+        domain = urlparse(u).netloc or u  # fallback to full string
+    except Exception:
+        domain = u
+
+    # ── Match on domain first (most reliable) ──────────────────────
+    if "deepseek.com" in domain:
         return "deepseek"
-    if "anthropic" in u:
+    if "anthropic.com" in domain:
         return "anthropic"
-    if "openai" in u or "azure.com" in u:
+    if "openai.com" in domain or "openai.azure.com" in domain:
         return "openai"
-    if "groq" in u:
+    if "groq.com" in domain:
         return "groq"
-    if "together" in u:
+    if "together.xyz" in domain:
         return "together"
-    if "mistral" in u:
+    if "mistral.ai" in domain:
         return "mistral"
-    if "fireworks" in u:
+    if "fireworks.ai" in domain:
         return "fireworks"
-    if "x.ai" in u:
+    if "x.ai" in domain:
         return "xai"
-    if "perplexity" in u:
+    if "perplexity.ai" in domain:
         return "perplexity"
-    if "githubcopilot" in u or "copilot" in u:
+    if "githubcopilot.com" in domain:
         return "github-copilot"
-    if "openrouter" in u:
+    if "openrouter.ai" in domain:
         return "openrouter"
+    if "googleapis.com" in domain or "generativelanguage.googleapis.com" in domain:
+        return "google-gemini"
+
+    # ── Fallback: check the full string for less common patterns ───
+    if "azure.com" in u:
+        return "openai"
     if "googleapis" in u or "generativelanguage" in u:
         return "google-gemini"
+
     return None
 
 
