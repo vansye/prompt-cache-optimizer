@@ -23,10 +23,17 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+.trae/
 *.swp
 
 # Project specific
 *.log
+
+# Runtime session store (contains API keys — never commit)
+.popt/
+
+# Build/demo artifacts
+popt-demo.zip
 
 # Office temp files (auto-save, lock files)
 ~$*

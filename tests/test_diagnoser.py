@@ -240,9 +240,43 @@ class TestParseUsage:
             }
         }
         metrics = parse_usage(response)
-        assert metrics.input_tokens == 100
+        # prompt_tokens is TOTAL; input_tokens is the fresh (uncached) bucket
+        assert metrics.input_tokens == 70
         assert metrics.cache_read_input_tokens == 30
+        assert metrics.cache_creation_input_tokens == 0
         assert metrics.output_tokens == 50
+
+    def test_deepseek_format(self):
+        # DeepSeek: prompt_tokens is TOTAL (= hit + miss); parse_usage
+        # normalizes to disjoint buckets (input_tokens = miss portion).
+        response = {
+            "usage": {
+                "prompt_tokens": 1000,
+                "completion_tokens": 50,
+                "prompt_cache_hit_tokens": 800,
+                "prompt_cache_miss_tokens": 200,
+            }
+        }
+        metrics = parse_usage(response)
+        assert metrics.input_tokens == 200
+        assert metrics.cache_read_input_tokens == 800
+        assert metrics.cache_creation_input_tokens == 0
+        assert metrics.output_tokens == 50
+        # Disjoint buckets reconstruct the total
+        assert metrics.input_tokens + metrics.cache_read_input_tokens == 1000
+
+    def test_deepseek_all_hit(self):
+        # Edge: everything cached — miss field present but zero
+        response = {
+            "usage": {
+                "prompt_tokens": 800,
+                "prompt_cache_hit_tokens": 800,
+                "prompt_cache_miss_tokens": 0,
+            }
+        }
+        metrics = parse_usage(response)
+        assert metrics.input_tokens == 0
+        assert metrics.cache_read_input_tokens == 800
 
     def test_empty_response(self):
         metrics = parse_usage({})
@@ -329,3 +363,45 @@ class TestHitRatioCalculator:
         ]
         report = HitRatioCalculator.calculate(entries)
         assert report.estimated_cost_saved > 0
+
+    def test_parse_to_report_integration(self):
+        # Regression: parse_usage output fed into HitRatioCalculator must
+        # keep hit_ratio in [0, 1] — a high-hit DeepSeek response used to
+        # produce ratios like 400% when input_tokens semantics diverged.
+        response = {
+            "usage": {
+                "prompt_tokens": 1000,
+                "prompt_cache_hit_tokens": 800,
+                "prompt_cache_miss_tokens": 200,
+                "completion_tokens": 50,
+            }
+        }
+        metrics = parse_usage(response)
+        report = HitRatioCalculator.calculate(
+            [CacheEntry(0, metrics, is_hit=True)])
+        assert 0.0 <= report.hit_ratio <= 1.0
+        assert abs(report.hit_ratio - 0.8) < 1e-9
+        assert report.estimated_cost_saved >= 0
+
+    def test_provider_pricing(self):
+        from optimizer.config import PricingInfo
+        entries = [CacheEntry(0, CacheMetrics(
+            input_tokens=200, cache_read_input_tokens=800,
+        ), is_hit=True)]
+        pricing = PricingInfo(input=2.0, cache_read=0.2, output=8.0,
+                              currency="CNY")
+        report = HitRatioCalculator.calculate(entries, pricing=pricing)
+        assert report.currency == "CNY"
+        # saved = read * (input_price - read_price) / 1M
+        assert abs(report.estimated_cost_saved
+                   - 800 * (2.0 - 0.2) / 1_000_000) < 1e-12
+
+    def test_default_pricing_unchanged(self):
+        # Backward compat: no pricing arg -> Anthropic USD estimate
+        entries = [CacheEntry(0, CacheMetrics(
+            input_tokens=200, cache_read_input_tokens=800,
+        ), is_hit=True)]
+        report = HitRatioCalculator.calculate(entries)
+        assert report.currency == "USD"
+        assert abs(report.estimated_cost_saved
+                   - 800 * (3.0 - 0.30) / 1_000_000) < 1e-12

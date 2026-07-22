@@ -1,0 +1,1512 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>popt 控制面板</title>
+<style>
+  :root {
+    --sidebar-bg: #111827;
+    --sidebar-border: #1e293b;
+    --sidebar-hover: #1e293b;
+    --sidebar-active: #1e3a5f;
+    --bg: #0f172a;
+    --bg-card: #1e293b;
+    --bg-inset: #0c1322;
+    --border: #2a3a52;
+    --border-bright: #3b5070;
+    --text: #e2e8f0;
+    --text-mid: #94a3b8;
+    --text-dim: #64748b;
+    --accent: #60a5fa;
+    --accent-dim: #3b82f6;
+    --green: #34d399;
+    --green-dim: #059669;
+    --red: #f87171;
+    --amber: #fbbf24;
+    --purple: #a78bfa;
+    --pink: #f472b6;
+    --cyan: #22d3ee;
+    --sidebar-w: 260px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Inter", -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    display: flex;
+    min-height: 100vh;
+  }
+  .mono { font-family: "JetBrains Mono", "SF Mono", Consolas, monospace; }
+
+  /* ── Sidebar ─────────────────────────────────────── */
+  .sidebar {
+    width: var(--sidebar-w);
+    min-height: 100vh;
+    background: var(--sidebar-bg);
+    border-right: 1px solid var(--sidebar-border);
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    top: 0; left: 0; bottom: 0;
+    z-index: 20;
+    overflow-y: auto;
+  }
+  .sidebar-brand {
+    padding: 20px 18px 16px;
+    border-bottom: 1px solid var(--sidebar-border);
+  }
+  .sidebar-brand .logo {
+    font-family: "JetBrains Mono", monospace;
+    font-weight: 700; font-size: 18px;
+    color: var(--text);
+  }
+  .sidebar-brand .logo .dot { color: var(--accent); }
+  .sidebar-brand .subtitle {
+    font-size: 11px; color: var(--text-dim);
+    margin-top: 2px;
+  }
+  .sidebar-status {
+    display: flex; align-items: center; gap: 6px;
+    padding: 10px 18px;
+    border-bottom: 1px solid var(--sidebar-border);
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px; color: var(--green);
+  }
+  .sidebar-status .live {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--green);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%,100% { opacity: 1; }
+    50% { opacity: 0.35; }
+  }
+
+  .sidebar-nav {
+    padding: 12px 10px;
+    flex: 1;
+  }
+  .nav-section-label {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 9px; color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    padding: 12px 8px 6px;
+  }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text-mid);
+    transition: all 0.12s;
+    margin-bottom: 2px;
+    user-select: none;
+  }
+  .nav-item:hover { background: var(--sidebar-hover); color: var(--text); }
+  .nav-item.active { background: var(--sidebar-active); color: var(--accent); }
+  .nav-item .icon { font-size: 15px; width: 20px; text-align: center; }
+  .nav-item .badge {
+    margin-left: auto;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1px 8px;
+    font-size: 11px;
+    font-family: "JetBrains Mono", monospace;
+    color: var(--text-dim);
+  }
+  .nav-item.active .badge {
+    background: rgba(96,165,250,0.15);
+    border-color: var(--accent-dim);
+    color: var(--accent);
+  }
+
+  .sidebar-footer {
+    padding: 14px 18px;
+    border-top: 1px solid var(--sidebar-border);
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+    line-height: 1.8;
+  }
+  .sidebar-footer strong { color: var(--text-mid); }
+
+  /* ── Main ───────────────────────────────────────── */
+  .main {
+    margin-left: var(--sidebar-w);
+    flex: 1;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  .topbar {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(15,23,42,0.92);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--sidebar-border);
+    padding: 14px 28px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .topbar-title {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 14px; font-weight: 600;
+    color: var(--text);
+  }
+  .topbar-title .slash { color: var(--text-dim); font-weight: 400; }
+
+  .content {
+    padding: 24px 28px 60px;
+    max-width: 1100px;
+    width: 100%;
+  }
+
+  .view { display: none; }
+  .view.active { display: block; }
+
+  /* ── KPI cards ──────────────────────────────────── */
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin-bottom: 18px;
+  }
+  .kpi {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    position: relative;
+    overflow: hidden;
+  }
+  .kpi::before {
+    content: "";
+    position: absolute; left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: var(--accent);
+  }
+  .kpi.k-green::before { background: var(--green); }
+  .kpi.k-amber::before { background: var(--amber); }
+  .kpi.k-purple::before { background: var(--purple); }
+  .kpi .kpi-label {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 6px;
+  }
+  .kpi .kpi-value {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 22px; font-weight: 700;
+    color: var(--text);
+    line-height: 1.1;
+  }
+  .kpi .kpi-sub {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+  .kpi .kpi-sub.green { color: var(--green); }
+  .kpi .kpi-sub.amber { color: var(--amber); }
+  .kpi .kpi-label { display: flex; align-items: center; gap: 6px; }
+  .kpi .kpi-label .cache-status {
+    margin-left: auto;
+    font-size: 10px;
+    cursor: help;
+    color: var(--text-dim);
+  }
+  .kpi .kpi-label .cache-status.active { color: var(--green); animation: pulse 2s infinite; }
+  .kpi .kpi-label .cache-status.aging { color: var(--amber); }
+  .kpi .kpi-label .cache-status.expired { color: var(--red); opacity: 0.5; }
+  .kpi .kpi-label .cache-status.idle { color: var(--text-dim); opacity: 0.3; }
+
+  /* ── Cards ───────────────────────────────────────── */
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 16px;
+  }
+  .card-header {
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--border);
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .card-header .hint {
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: none;
+    letter-spacing: 0;
+  }
+
+  /* ── Session table ───────────────────────────────── */
+  .session-table-header {
+    display: grid;
+    grid-template-columns: 1.5fr 1fr 0.7fr 0.9fr 0.9fr 1fr 0.5fr 64px;
+    gap: 12px;
+    padding: 10px 18px;
+    background: var(--bg-inset);
+    border-bottom: 1px solid var(--border);
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .session-table-header span { text-align: right; }
+  .session-table-header span:first-child,
+  .session-table-header span:nth-child(2) { text-align: left; }
+
+  .session-row {
+    display: grid;
+    grid-template-columns: 1.5fr 1fr 0.7fr 0.9fr 0.9fr 1fr 0.5fr 64px;
+    gap: 12px;
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--border);
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12px;
+    align-items: center;
+    transition: background 0.1s;
+  }
+  .session-row:last-child { border-bottom: none; }
+  .session-row:hover { background: rgba(96,165,250,0.03); }
+  .session-row .s-name { color: var(--text); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .session-row .s-name .key-tag {
+    display: inline-block;
+    font-size: 9px;
+    color: var(--text-dim);
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 5px;
+    margin-left: 6px;
+    font-weight: 400;
+    vertical-align: middle;
+  }
+  .session-row .s-model { color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .session-row .s-provider {
+    color: var(--purple); font-size: 11px;
+  }
+  .session-row .s-provider .prov-dot {
+    display: inline-block;
+    width: 6px; height: 6px; border-radius: 50%;
+    margin-right: 4px;
+    vertical-align: middle;
+  }
+  .session-row .s-hit { text-align: right; position: relative; }
+  .session-row .s-hit .hit-num { font-weight: 600; }
+  .session-row .s-hit .hit-num.green { color: var(--green); }
+  .session-row .s-hit .hit-num.amber { color: var(--amber); }
+  .session-row .s-hit .hit-num.dim { color: var(--text-dim); }
+  .session-row .s-hit .hit-sub {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 9px;
+    color: var(--text-dim);
+    margin-top: 2px;
+    line-height: 1;
+  }
+  .session-row .s-hit .cache-dot {
+    position: absolute;
+    top: 2px; right: -4px;
+    font-size: 9px;
+    cursor: help;
+  }
+  .session-row .s-hit .hit-bar {
+    height: 3px; border-radius: 2px;
+    background: var(--bg-inset);
+    margin-top: 4px;
+    overflow: hidden;
+  }
+  .session-row .s-hit .hit-bar .fill {
+    height: 100%; border-radius: 2px;
+    background: var(--green);
+    transition: width 0.3s;
+  }
+  .session-row .s-cost { text-align: right; color: var(--text-mid); }
+  .session-row .s-cost .saved { color: var(--green); font-size: 10px; }
+  .session-row .s-tokens { text-align: right; color: var(--text-dim); font-size: 11px; line-height: 1.6; }
+  .session-row .s-reqs { text-align: right; color: var(--text-dim); }
+  .session-row .btn-del {
+    background: none; border: 1px solid transparent;
+    color: var(--text-dim); cursor: pointer; font-size: 14px;
+    border-radius: 4px; padding: 2px 6px;
+    transition: all 0.15s; text-align: center;
+  }
+  .session-row .btn-del:hover { color: var(--red); border-color: var(--red); }
+
+  .total-row {
+    display: grid;
+    grid-template-columns: 1.5fr 1fr 0.7fr 0.9fr 0.9fr 1fr 0.5fr 64px;
+    gap: 12px;
+    padding: 12px 18px;
+    background: rgba(96,165,250,0.04);
+    border-top: 2px solid var(--accent);
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12px; font-weight: 700;
+    align-items: center;
+  }
+  .total-row .t-label { color: var(--accent); }
+  .total-row .t-val { text-align: right; color: var(--text); }
+  .total-row .t-val.green { color: var(--green); }
+  .total-row .t-val.amber { color: var(--amber); }
+
+  .empty-state {
+    padding: 40px;
+    text-align: center;
+    color: var(--text-dim);
+    font-family: "JetBrains Mono", monospace;
+    font-size: 13px;
+  }
+  .empty-state .icon { font-size: 32px; margin-bottom: 12px; opacity: 0.4; }
+
+  /* ── Add form ───────────────────────────────────── */
+  .provider-templates {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .prov-tpl {
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: left;
+    font-family: "JetBrains Mono", monospace;
+  }
+  .prov-tpl:hover {
+    border-color: var(--accent);
+    background: rgba(96,165,250,0.05);
+  }
+  .prov-tpl .pt-name {
+    font-size: 12px; font-weight: 600;
+    color: var(--text);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .prov-tpl .pt-name .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+  }
+  .prov-tpl .pt-model {
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-top: 3px;
+  }
+
+  .add-form {
+    display: grid;
+    grid-template-columns: 130px 1fr 1fr auto;
+    gap: 10px;
+    align-items: center;
+    padding: 16px 18px;
+  }
+  .add-form input {
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 9px 14px;
+    color: var(--text);
+    font-family: "JetBrains Mono", monospace;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.15s;
+    width: 100%;
+  }
+  .add-form input:focus { border-color: var(--accent); }
+  .add-form input::placeholder { color: var(--text-dim); }
+  .btn-add {
+    background: rgba(52,211,153,0.12);
+    border: 1px solid var(--green);
+    color: var(--green);
+    border-radius: 6px;
+    padding: 9px 20px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .btn-add:hover { background: rgba(52,211,153,0.22); }
+
+  .add-hint {
+    padding: 10px 18px 14px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    border-top: 1px solid var(--border);
+    background: var(--bg-inset);
+  }
+  .add-hint strong { color: var(--accent); }
+
+  /* Mini session preview inside Add view */
+  .mini-session {
+    display: grid;
+    grid-template-columns: 1.5fr 1fr 0.7fr 0.5fr;
+    gap: 10px;
+    padding: 9px 18px;
+    border-bottom: 1px solid var(--border);
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    align-items: center;
+  }
+  .mini-session:last-child { border-bottom: none; }
+  .mini-session .m-name { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mini-session .m-model { color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mini-session .m-provider { color: var(--purple); font-size: 10px; }
+  .mini-session .m-reqs { text-align: right; color: var(--text-dim); }
+
+  /* ── Logs ────────────────────────────────────────── */
+  .log-box {
+    background: var(--bg-inset);
+    max-height: 480px;
+    overflow-y: auto;
+  }
+  .log-row {
+    display: grid;
+    grid-template-columns: 64px 110px 44px 50px 1fr 80px 56px;
+    gap: 8px;
+    padding: 8px 18px;
+    border-bottom: 1px solid var(--border);
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12px;
+    align-items: center;
+  }
+  .log-row:last-child { border-bottom: none; }
+  .log-row .ts { color: var(--text-dim); }
+  .log-row .sess { color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .log-row .hit { font-weight: 600; text-align: center; }
+  .log-row .hit.yes { color: var(--green); }
+  .log-row .hit.no { color: var(--red); }
+  .log-row .hit.stream { color: var(--purple); }
+  .log-row .toks { color: var(--text-mid); font-size: 11px; }
+  .log-row .stat { color: var(--text-dim); font-size: 10px; }
+  .log-row .time { color: var(--text-dim); text-align: right; }
+  .log-row .round-tag {
+    font-size: 9px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    text-align: center;
+    border: 1px solid;
+    line-height: 1.4;
+  }
+  .log-row .round-tag.first {
+    color: var(--amber);
+    border-color: var(--amber);
+    background: rgba(251,191,36,0.08);
+  }
+  .log-row .round-tag.steady {
+    color: var(--green);
+    border-color: var(--green-dim);
+    background: rgba(52,211,153,0.06);
+  }
+  .log-row .tool-tag {
+    display: inline-block;
+    margin-left: 4px;
+    padding: 0 4px;
+    font-size: 9px;
+    color: var(--text-dim);
+    background: var(--bg-inset);
+    border-radius: 2px;
+    vertical-align: middle;
+  }
+
+  /* ── Connection cards ───────────────────────────── */
+  .conn-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px;
+    padding: 16px 18px;
+  }
+  .conn-card {
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px;
+    position: relative;
+  }
+  .conn-card .cc-head {
+    display: flex; align-items: center; gap: 8px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12px; font-weight: 600;
+    color: var(--text);
+    margin-bottom: 10px;
+  }
+  .conn-card .cc-head .cc-tag {
+    font-size: 9px;
+    background: rgba(96,165,250,0.12);
+    border: 1px solid var(--accent-dim);
+    color: var(--accent);
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-left: auto;
+    text-transform: uppercase;
+  }
+  .conn-card .cc-body {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    color: var(--text-mid);
+    line-height: 1.8;
+  }
+  .conn-card .cc-code {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 8px 10px;
+    margin-top: 6px;
+    font-size: 11px;
+    color: var(--green);
+    word-break: break-all;
+    position: relative;
+  }
+  .conn-card .cc-code .copy {
+    position: absolute; top: 4px; right: 4px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-bright);
+    border-radius: 3px;
+    padding: 1px 6px;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 9px;
+    transition: all 0.15s;
+  }
+  .conn-card .cc-code .copy:hover { color: var(--accent); border-color: var(--accent); }
+  .conn-card .cc-note {
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-top: 8px;
+    line-height: 1.6;
+  }
+
+  /* ── Toast ───────────────────────────────────────── */
+  .toast {
+    position: fixed; bottom: 24px; left: 50%;
+    transform: translateX(-50%) translateY(100px);
+    background: var(--bg-card);
+    border: 1px solid var(--green);
+    color: var(--green);
+    padding: 10px 20px;
+    border-radius: 6px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12px;
+    transition: transform 0.3s;
+    z-index: 100;
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+  .toast.error { border-color: var(--red); color: var(--red); }
+
+  /* ── Modal ──────────────────────────────────────── */
+  .modal-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.6);
+    backdrop-filter: blur(2px);
+    display: none;
+    align-items: center; justify-content: center;
+    z-index: 200;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal {
+    background: var(--bg-card);
+    border: 1px solid var(--border-bright);
+    border-radius: 10px;
+    width: 460px; max-width: 92vw;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    overflow: hidden;
+  }
+  .modal-head {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .modal-head .m-title {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 13px; font-weight: 600;
+    color: var(--text);
+  }
+  .modal-head .m-close {
+    background: none; border: none;
+    color: var(--text-dim); cursor: pointer;
+    font-size: 18px; line-height: 1;
+    padding: 2px 6px; border-radius: 4px;
+  }
+  .modal-head .m-close:hover { color: var(--red); background: rgba(248,113,113,0.1); }
+  .modal-body {
+    padding: 18px 20px;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .modal-field {
+    display: flex; flex-direction: column; gap: 5px;
+  }
+  .modal-field label {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10px; color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .modal-field input {
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 9px 12px;
+    color: var(--text);
+    font-family: "JetBrains Mono", monospace;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.15s;
+    width: 100%;
+  }
+  .modal-field input:focus { border-color: var(--accent); }
+  .modal-field input::placeholder { color: var(--text-dim); }
+  .modal-field .field-row {
+    display: flex; gap: 8px; align-items: center;
+  }
+  .modal-field .field-row input { flex: 1; }
+  .modal-field .toggle-eye {
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 9px 12px;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.15s;
+    user-select: none;
+  }
+  .modal-field .toggle-eye:hover { color: var(--accent); border-color: var(--accent); }
+  .modal-field .hint-txt {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+  }
+  .modal-foot {
+    padding: 12px 20px;
+    border-top: 1px solid var(--border);
+    display: flex; gap: 10px; justify-content: flex-end;
+    background: var(--bg-inset);
+  }
+  .modal-foot button {
+    border-radius: 6px;
+    padding: 8px 18px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn-cancel {
+    background: transparent;
+    border: 1px solid var(--border-bright);
+    color: var(--text-mid);
+  }
+  .btn-cancel:hover { color: var(--text); border-color: var(--text-mid); }
+  .btn-save {
+    background: rgba(96,165,250,0.12);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+  }
+  .btn-save:hover { background: rgba(96,165,250,0.22); }
+
+  /* ── Key visibility toggle in add form ─────────── */
+  .add-form .field-key-wrap {
+    position: relative;
+    display: flex; align-items: center;
+  }
+  .add-form .field-key-wrap input { padding-right: 38px; }
+  .add-form .toggle-eye {
+    position: absolute; right: 8px;
+    background: none; border: none;
+    color: var(--text-dim); cursor: pointer;
+    font-size: 14px; padding: 2px 4px;
+    transition: color 0.15s;
+  }
+  .add-form .toggle-eye:hover { color: var(--accent); }
+
+  /* ── Edit button in session row ────────────────── */
+  .session-row .btn-edit {
+    background: none; border: 1px solid transparent;
+    color: var(--text-dim); cursor: pointer; font-size: 13px;
+    border-radius: 4px; padding: 2px 6px;
+    transition: all 0.15s; text-align: center;
+    margin-right: 2px;
+  }
+  .session-row .btn-edit:hover { color: var(--accent); border-color: var(--accent); }
+  .session-row .s-actions {
+    display: flex; gap: 2px; align-items: center;
+  }
+
+  /* ── Scrollbar ──────────────────────────────────── */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--border-bright); }
+
+  @media (max-width: 900px) {
+    .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+    .provider-templates { grid-template-columns: repeat(2, 1fr); }
+    .conn-grid { grid-template-columns: 1fr; }
+    .add-form { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 768px) {
+    .sidebar { display: none; }
+    .main { margin-left: 0; }
+    .session-table-header, .session-row, .total-row {
+      grid-template-columns: 1fr 80px 60px 36px;
+    }
+    .session-table-header span:nth-child(n+3):nth-child(-n+7),
+    .session-row .s-provider, .session-row .s-cost, .session-row .s-tokens,
+    .session-row .s-hit .hit-bar,
+    .total-row .t-val:nth-child(n+3):nth-child(-n+7) { display: none; }
+    .log-row { grid-template-columns: 56px 80px 36px 40px 1fr; }
+    .log-row .stat, .log-row .time { display: none; }
+    .log-row .round-tag { font-size: 8px; padding: 0 3px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ── Sidebar ──────────────────────────────────────── -->
+<aside class="sidebar">
+  <div class="sidebar-brand">
+    <div class="logo">popt<span class="dot">.</span></div>
+    <div class="subtitle">Prompt Optimizer</div>
+  </div>
+  <div class="sidebar-status">
+    <span class="live"></span>
+    <span id="sidebarStatus">运行中 · <span class="dyn-port">6123</span></span>
+  </div>
+
+  <nav class="sidebar-nav">
+    <div class="nav-section-label">概览</div>
+    <div class="nav-item active" data-view="sessions">
+      <span class="icon">◈</span> 会话管理
+      <span class="badge" id="navSessionCount">0</span>
+    </div>
+    <div class="nav-item" data-view="logs">
+      <span class="icon">▤</span> 请求日志
+      <span class="badge" id="navLogCount">0</span>
+    </div>
+
+    <div class="nav-section-label">配置</div>
+    <div class="nav-item" data-view="add">
+      <span class="icon">＋</span> 添加会话
+    </div>
+    <div class="nav-item" data-view="connect">
+      <span class="icon">⊡</span> 连接方式
+    </div>
+  </nav>
+
+  <div class="sidebar-footer">
+    <strong>代理地址</strong><br>
+    http://localhost:<span class="dyn-port">6123</span><br>
+    <strong>版本</strong> popt v0.4.0
+  </div>
+</aside>
+
+<!-- ── Main ─────────────────────────────────────────── -->
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-title" id="topbarTitle">
+      <span class="slash">//</span> 会话管理
+    </div>
+    <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-dim);" id="topbarTime"></div>
+  </div>
+
+  <div class="content">
+
+    <!-- View: Sessions -->
+    <div class="view active" id="view-sessions">
+      <!-- KPI cards -->
+      <div class="kpi-grid" id="kpiGrid">
+        <div class="kpi">
+          <div class="kpi-label">总请求</div>
+          <div class="kpi-value" id="kpiRequests">0</div>
+          <div class="kpi-sub" id="kpiRequestsSub">跨 0 个会话</div>
+        </div>
+        <div class="kpi k-green">
+          <div class="kpi-label">
+            稳态命中率
+            <span class="cache-status" id="kpiCacheStatus" title="缓存活跃度">●</span>
+          </div>
+          <div class="kpi-value" id="kpiHit">0.0%</div>
+          <div class="kpi-sub green" id="kpiHitSub">首轮 0% · 最新 0%</div>
+        </div>
+        <div class="kpi k-amber">
+          <div class="kpi-label">当前花费</div>
+          <div class="kpi-value" id="kpiCost">¥0.0000</div>
+          <div class="kpi-sub" id="kpiCostSub">未优化 ¥0.0000</div>
+        </div>
+        <div class="kpi k-purple">
+          <div class="kpi-label">已节省</div>
+          <div class="kpi-value" id="kpiSaved">¥0.0000</div>
+          <div class="kpi-sub" id="kpiSavedSub">输出 0 tokens</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span>会话 &amp; 统计</span>
+          <span class="hint" id="sessionCountLabel">0 个会话</span>
+        </div>
+        <div id="sessionTable">
+          <div class="empty-state">
+            <div class="icon">◇</div>
+            暂无会话 — 点击左侧「添加会话」开始
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- View: Logs -->
+    <div class="view" id="view-logs">
+      <div class="card">
+        <div class="card-header">
+          <span>请求日志</span>
+          <span class="hint" id="logCountLabel">0 条 · 最近 100 条</span>
+        </div>
+        <div class="log-box" id="logBox">
+          <div class="empty-state" style="padding:28px;">暂无请求 — 添加会话后发送请求即可看到日志</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- View: Add -->
+    <div class="view" id="view-add">
+      <div class="card">
+        <div class="card-header">
+          <span>添加新会话</span>
+          <span class="hint">可添加多个，每个 API Key = 一个独立会话</span>
+        </div>
+
+        <!-- Provider quick templates -->
+        <div class="provider-templates" id="providerTemplates">
+          <button class="prov-tpl" data-provider="deepseek" data-model="deepseek-chat">
+            <div class="pt-name"><span class="dot" style="background:#4d6bfe;"></span>DeepSeek</div>
+            <div class="pt-model">deepseek-chat / reasoner</div>
+          </button>
+          <button class="prov-tpl" data-provider="anthropic" data-model="claude-sonnet-5-20250601">
+            <div class="pt-name"><span class="dot" style="background:#d97757;"></span>Anthropic</div>
+            <div class="pt-model">claude-sonnet / haiku / opus</div>
+          </button>
+          <button class="prov-tpl" data-provider="openai" data-model="gpt-4o">
+            <div class="pt-name"><span class="dot" style="background:#10a37f;"></span>OpenAI</div>
+            <div class="pt-model">gpt-4o / gpt-4.1 / o3</div>
+          </button>
+          <button class="prov-tpl" data-provider="google-gemini" data-model="gemini-2.0-flash">
+            <div class="pt-name"><span class="dot" style="background:#4285f4;"></span>Google</div>
+            <div class="pt-model">gemini-2.0-flash / 2.5-pro</div>
+          </button>
+        </div>
+
+        <!-- Add form -->
+        <div class="add-form">
+          <input type="text" id="sessionName" placeholder="名称 (可选)" autocomplete="off">
+          <input type="text" id="sessionModel" list="modelList" placeholder="模型名 (如 deepseek-chat)" autocomplete="off">
+          <datalist id="modelList"></datalist>
+          <div class="field-key-wrap">
+            <input type="password" id="sessionKey" placeholder="API Key (sk-...)" autocomplete="off">
+            <span class="toggle-eye" data-target="sessionKey" title="显示/隐藏">👁</span>
+          </div>
+          <button class="btn-add" id="addBtn">+ 添加</button>
+        </div>
+
+        <div class="add-hint">
+          提示: 同一 API Key 重复添加将<strong>更新</strong>原有会话; 不同 Key 可并行管理<strong>多个会话</strong>; 请求通过 API Key 自动路由。
+        </div>
+      </div>
+
+      <!-- Existing sessions preview -->
+      <div class="card">
+        <div class="card-header">
+          <span>已有会话</span>
+          <span class="hint" id="addViewSessionCount">0 个 · 可继续添加</span>
+        </div>
+        <div id="addViewSessionList">
+          <div class="empty-state" style="padding:24px;font-size:12px;">尚未添加任何会话</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- View: Connect -->
+    <div class="view" id="view-connect">
+      <div class="card">
+        <div class="card-header">
+          <span>连接方式</span>
+          <span class="hint">将 AI 工具的 BASE_URL 指向本代理</span>
+        </div>
+        <div class="conn-grid">
+
+          <div class="conn-card">
+            <div class="cc-head">
+              <span>Claude Code / Anthropic SDK</span>
+              <span class="cc-tag">Anthropic</span>
+            </div>
+            <div class="cc-body">设置环境变量后启动 claude:</div>
+            <div class="cc-code" id="ccAnthropic"><span class="cc-text">export ANTHROPIC_BASE_URL=http://localhost:6123
+export ANTHROPIC_AUTH_TOKEN=sk-your-key</span><span class="copy" data-target="ccAnthropic">复制</span></div>
+            <div class="cc-note">API Key 也可以在面板「添加会话」中配置，工具内任意填即可</div>
+          </div>
+
+          <div class="conn-card">
+            <div class="cc-head">
+              <span>CC Switch</span>
+              <span class="cc-tag">Config</span>
+            </div>
+            <div class="cc-body">在 CC Switch 中新增配置项:</div>
+            <div class="cc-code" id="ccCcs"><span class="cc-text">{
+  "baseURL": "http://localhost:6123",
+  "authToken": "sk-your-key"
+}</span><span class="copy" data-target="ccCcs">复制</span></div>
+            <div class="cc-note">代理自动转换 Authorization → x-api-key (DeepSeek Anthropic 端点)</div>
+          </div>
+
+          <div class="conn-card">
+            <div class="cc-head">
+              <span>Cursor / OpenAI SDK</span>
+              <span class="cc-tag">OpenAI</span>
+            </div>
+            <div class="cc-body">OpenAI 兼容工具:</div>
+            <div class="cc-code" id="ccOpenai"><span class="cc-text">export OPENAI_BASE_URL=http://localhost:6123/v1
+export OPENAI_API_KEY=sk-your-key</span><span class="copy" data-target="ccOpenai">复制</span></div>
+            <div class="cc-note">支持 OpenAI 格式: /v1/chat/completions</div>
+          </div>
+
+          <div class="conn-card">
+            <div class="cc-head">
+              <span>通用 HTTP 直连</span>
+              <span class="cc-tag">Direct</span>
+            </div>
+            <div class="cc-body">直接请求代理端点:</div>
+            <div class="cc-code" id="ccDirect"><span class="cc-text">POST http://localhost:6123/v1/messages
+POST http://localhost:6123/v1/chat/completions
+Header: x-api-key: sk-your-key</span><span class="copy" data-target="ccDirect">复制</span></div>
+            <div class="cc-note">代理根据路径自动识别 Anthropic / OpenAI 格式</div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- ── Edit Modal ────────────────────────────────────── -->
+<div class="modal-overlay" id="editModal">
+  <div class="modal">
+    <div class="modal-head">
+      <span class="m-title">编辑会话</span>
+      <button class="m-close" id="editModalClose">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-field">
+        <label>会话名称</label>
+        <input type="text" id="editName" placeholder="名称 (可选)" autocomplete="off">
+      </div>
+      <div class="modal-field">
+        <label>模型</label>
+        <input type="text" id="editModel" list="modelList" placeholder="模型名" autocomplete="off">
+      </div>
+      <div class="modal-field">
+        <label>API Key</label>
+        <div class="field-row">
+          <input type="password" id="editKey" placeholder="留空则不修改" autocomplete="off">
+          <span class="toggle-eye" data-target="editKey" title="显示/隐藏">👁</span>
+        </div>
+        <div class="hint-txt">留空保持原 Key 不变; 输入新 Key 将替换 (统计保留)</div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn-cancel" id="editCancel">取消</button>
+      <button class="btn-save" id="editSave">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ── Dynamic port (derived from actual access URL) ───
+  const PORT = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
+  const HOST = window.location.hostname || 'localhost';
+  const BASE = `http://${HOST}:${PORT}`;
+  // Update all dynamic port placeholders
+  document.querySelectorAll('.dyn-port').forEach(el => el.textContent = PORT);
+  // Update connection code blocks with actual host:port
+  const CC_TEMPLATES = {
+    ccAnthropic: `export ANTHROPIC_BASE_URL=${BASE}\nexport ANTHROPIC_AUTH_TOKEN=sk-your-key`,
+    ccCcs: `{\n  "baseURL": "${BASE}",\n  "authToken": "sk-your-key"\n}`,
+    ccOpenai: `export OPENAI_BASE_URL=${BASE}/v1\nexport OPENAI_API_KEY=sk-your-key`,
+    ccDirect: `POST ${BASE}/v1/messages\nPOST ${BASE}/v1/chat/completions\nHeader: x-api-key: sk-your-key`,
+  };
+  Object.entries(CC_TEMPLATES).forEach(([id, text]) => {
+    const el = document.getElementById(id);
+    if (el) {
+      const txt = el.querySelector('.cc-text');
+      if (txt) txt.textContent = text;
+    }
+  });
+
+  // ── Provider color map ──────────────────────────────
+  const PROVIDER_COLORS = {
+    deepseek: '#4d6bfe',
+    anthropic: '#d97757',
+    openai: '#10a37f',
+    google: '#4285f4',
+    groq: '#f55036',
+    mistral: '#fa520f',
+    xai: '#000000',
+    together: '#000000',
+    perplexity: '#20808d',
+    openrouter: '#6467f0',
+  };
+  function provColor(p) { return PROVIDER_COLORS[p] || '#64748b'; }
+
+  // ── Navigation ──────────────────────────────────────
+  const viewTitles = {
+    sessions: '// 会话管理',
+    logs: '// 请求日志',
+    add: '// 添加会话',
+    connect: '// 连接方式',
+  };
+
+  document.querySelectorAll('.nav-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const view = item.dataset.view;
+      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+      item.classList.add('active');
+      document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+      document.getElementById('view-' + view).classList.add('active');
+      document.getElementById('topbarTitle').innerHTML =
+        '<span class="slash">//</span> ' + (viewTitles[view] || view).replace('// ', '');
+    });
+  });
+
+  // ── Init ────────────────────────────────────────────
+  let MODEL_LIST = [];
+  async function init() {
+    try {
+      const resp = await fetch('/api/init');
+      const data = await resp.json();
+      MODEL_LIST = data.models || [];
+      const list = document.getElementById('modelList');
+      list.innerHTML = '';
+      MODEL_LIST.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m;
+        list.appendChild(opt);
+      });
+    } catch (e) {
+      showToast('无法连接服务器', true);
+    }
+  }
+
+  // ─ Provider templates ──────────────────────────────
+  document.querySelectorAll('.prov-tpl').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const model = btn.dataset.model;
+      const provider = btn.dataset.provider;
+      document.getElementById('sessionModel').value = model;
+      // Auto-fill name if empty
+      const nameInput = document.getElementById('sessionName');
+      if (!nameInput.value.trim()) {
+        nameInput.value = provider + '-' + model.split('-').pop();
+      }
+      document.getElementById('sessionKey').focus();
+      showToast('已填充 ' + provider + ' 模板，请输入 API Key');
+    });
+  });
+
+  // ─ Add session ─────────────────────────────────────
+  document.getElementById('addBtn').addEventListener('click', async () => {
+    const name = document.getElementById('sessionName').value.trim();
+    const model = document.getElementById('sessionModel').value.trim();
+    const apiKey = document.getElementById('sessionKey').value.trim();
+
+    if (!model) { showToast('请输入模型名称', true); return; }
+    if (!apiKey) { showToast('请输入 API Key', true); return; }
+
+    try {
+      const resp = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, model, api_key: apiKey }),
+      });
+      const data = await resp.json();
+      if (resp.ok) {
+        showToast(data.message || '会话已添加');
+        document.getElementById('sessionName').value = '';
+        document.getElementById('sessionModel').value = '';
+        document.getElementById('sessionKey').value = '';
+        pollDashboard();
+        // Focus name field for quick consecutive adds
+        document.getElementById('sessionName').focus();
+      } else {
+        showToast(data.error || '添加失败', true);
+      }
+    } catch (e) {
+      showToast('网络错误', true);
+    }
+  });
+
+  // ── Delete session ──────────────────────────────────
+  async function deleteSession(sessionId, sessionName) {
+    const label = sessionName ? `「${sessionName}」` : '此会话';
+    if (!confirm(`确定删除 ${label}？所有统计数据将丢失且不可恢复。`)) return;
+    try {
+      const resp = await fetch('/api/session/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId }),
+      });
+      const data = await resp.json();
+      if (resp.ok) {
+        showToast('会话已删除');
+        pollDashboard();
+      } else {
+        showToast(data.error || '删除失败', true);
+      }
+    } catch (e) {
+      showToast('网络错误', true);
+    }
+  }
+
+  // ── Edit session modal ─────────────────────────────
+  let editingSessionId = null;
+
+  function openEditModal(sessionId, name, model) {
+    editingSessionId = sessionId;
+    document.getElementById('editName').value = name || '';
+    document.getElementById('editModel').value = model || '';
+    document.getElementById('editKey').value = '';
+    document.getElementById('editKey').type = 'password';
+    document.getElementById('editModal').classList.add('show');
+    document.getElementById('editName').focus();
+  }
+
+  function closeEditModal() {
+    editingSessionId = null;
+    document.getElementById('editModal').classList.remove('show');
+  }
+
+  document.getElementById('editModalClose').addEventListener('click', closeEditModal);
+  document.getElementById('editCancel').addEventListener('click', closeEditModal);
+  // Click outside modal closes it
+  document.getElementById('editModal').addEventListener('click', (e) => {
+    if (e.target.id === 'editModal') closeEditModal();
+  });
+  // ESC closes modal
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.getElementById('editModal').classList.contains('show')) {
+      closeEditModal();
+    }
+  });
+
+  document.getElementById('editSave').addEventListener('click', async () => {
+    if (!editingSessionId) return;
+    const name = document.getElementById('editName').value.trim();
+    const model = document.getElementById('editModel').value.trim();
+    const apiKey = document.getElementById('editKey').value.trim();
+
+    if (!model) { showToast('模型名不能为空', true); return; }
+
+    const payload = { session_id: editingSessionId, name, model };
+    if (apiKey) payload.api_key = apiKey;
+
+    try {
+      const resp = await fetch('/api/session/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await resp.json();
+      if (resp.ok) {
+        showToast('会话已更新');
+        closeEditModal();
+        pollDashboard();
+      } else {
+        showToast(data.error || '更新失败', true);
+      }
+    } catch (e) {
+      showToast('网络错误', true);
+    }
+  });
+
+  // Enter key in edit modal saves
+  ['editName', 'editModel', 'editKey'].forEach(id => {
+    document.getElementById(id).addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); document.getElementById('editSave').click(); }
+    });
+  });
+
+  // ── Dashboard polling ───────────────────────────────
+  async function pollDashboard() {
+    try {
+      const resp = await fetch('/api/dashboard');
+      const data = await resp.json();
+      const sessions = data.sessions || [];
+      const agg = data.aggregate || {};
+      const logs = data.logs || [];
+
+      renderKPI(sessions, agg);
+      renderSessions(sessions, agg);
+      renderAddViewSessions(sessions);
+      renderLogs(logs);
+
+      // Update nav badges & labels
+      document.getElementById('navSessionCount').textContent = sessions.length;
+      document.getElementById('navLogCount').textContent = logs.length;
+      document.getElementById('sessionCountLabel').textContent = sessions.length + ' 个会话';
+      document.getElementById('logCountLabel').textContent = logs.length + ' 条 · 最近 100 条';
+      document.getElementById('addViewSessionCount').textContent = sessions.length + ' 个 · 可继续添加';
+    } catch (e) { /* silent */ }
+  }
+
+  function renderKPI(sessions, agg) {
+    const cur = agg.currency === 'CNY' ? '¥' : '$';
+    document.getElementById('kpiRequests').textContent = fmtNum(agg.total_requests || 0);
+    document.getElementById('kpiRequestsSub').textContent = `跨 ${sessions.length} 个会话`;
+
+    // 稳态命中率为主，首轮+最新为辅
+    const steadyPct = ((agg.steady_hit_ratio || 0) * 100).toFixed(1) + '%';
+    const firstRoundPct = ((agg.first_round_hit_ratio || 0) * 100).toFixed(0) + '%';
+    // 最新命中率取所有会话里最近一次请求的最大值（最有代表性的活跃会话）
+    const latestRatios = sessions.map(s => s.latest_hit_ratio || 0).filter(r => r > 0);
+    const latestPct = latestRatios.length
+      ? (Math.max(...latestRatios) * 100).toFixed(0) + '%'
+      : '0%';
+    document.getElementById('kpiHit').textContent = steadyPct;
+    document.getElementById('kpiHitSub').textContent = `首轮 ${firstRoundPct} · 最新 ${latestPct}`;
+
+    // 缓存活跃度（取所有会话中最活跃的状态）
+    const statuses = sessions.map(s => s.cache_status || 'idle');
+    const priority = { active: 4, aging: 3, expired: 2, idle: 1 };
+    const bestStatus = statuses.length
+      ? statuses.reduce((a, b) => (priority[a] || 0) >= (priority[b] || 0) ? a : b)
+      : 'idle';
+    const statusEl = document.getElementById('kpiCacheStatus');
+    statusEl.className = 'cache-status ' + bestStatus;
+    const statusLabel = {
+      active: '活跃（TTL 窗口内）',
+      aging: '老化中（可能即将过期）',
+      expired: '已过期',
+      idle: '空闲'
+    }[bestStatus] || '空闲';
+    statusEl.title = '缓存活跃度: ' + statusLabel;
+
+    document.getElementById('kpiCost').textContent = cur + (agg.actual_cost || 0).toFixed(4);
+    document.getElementById('kpiCostSub').textContent = `未优化 ${cur}${(agg.cost_without_opt || 0).toFixed(4)}`;
+
+    document.getElementById('kpiSaved').textContent = cur + (agg.cost_saved || 0).toFixed(4);
+    document.getElementById('kpiSavedSub').textContent = `输出 ${fmtNum(agg.total_output_tokens || 0)} tokens`;
+  }
+
+  function renderSessions(sessions, agg) {
+    const table = document.getElementById('sessionTable');
+
+    if (!sessions.length) {
+      table.innerHTML = '<div class="empty-state"><div class="icon">◇</div>暂无会话 — 点击左侧「添加会话」开始</div>';
+      return;
+    }
+
+    let html = `<div class="session-table-header">
+      <span>会话</span><span>模型</span><span>供应商</span>
+      <span>命中率</span><span>花费</span><span>Tokens</span><span>请求</span><span></span>
+    </div>`;
+
+    sessions.forEach(s => {
+      // 稳态命中率为主
+      const steadyPct = ((s.steady_hit_ratio || 0) * 100).toFixed(1) + '%';
+      const hitClass = (s.steady_hit_ratio || 0) > 0.5 ? 'green'
+                     : (s.steady_hit_ratio || 0) > 0 ? 'amber' : 'dim';
+      const firstRoundPct = ((s.first_round_hit_ratio || 0) * 100).toFixed(0) + '%';
+      const latestPct = ((s.latest_hit_ratio || 0) * 100).toFixed(0) + '%';
+      // 缓存活跃度指示
+      const cs = s.cache_status || 'idle';
+      const csIcon = cs === 'active' ? '🟢' : cs === 'aging' ? '🟡' : cs === 'expired' ? '🔴' : '⚪';
+      const csTitle = {
+        active: '活跃（TTL 窗口内）',
+        aging: '老化中（10分钟~1小时）',
+        expired: '已过期（超过1小时）',
+        idle: '空闲（无请求）'
+      }[cs] || '空闲';
+      const sCur = s.cost?.currency === 'CNY' ? '¥' : '$';
+      const actualCost = sCur + (s.cost?.actual || 0).toFixed(4);
+      const savedCost = sCur + (s.cost?.saved || 0).toFixed(4);
+      const pc = provColor(s.provider);
+      html += `<div class="session-row">
+        <span class="s-name" title="${esc(s.name)} · Key: ${esc(s.api_key_prefix)} · Tool: ${esc(s.tool || 'unknown')}">
+          ${esc(s.name)}<span class="key-tag">${esc(s.api_key_prefix)}</span>
+        </span>
+        <span class="s-model" title="${esc(s.model)}">${esc(s.model)}</span>
+        <span class="s-provider"><span class="prov-dot" style="background:${pc};"></span>${esc(s.provider)}</span>
+        <span class="s-hit">
+          <span class="hit-num ${hitClass}" title="稳态命中率（排除首轮冷启动）">${steadyPct}</span>
+          <div class="hit-sub" title="首轮 ${firstRoundPct} · 最新 ${latestPct}">首 ${firstRoundPct} · 新 ${latestPct}</div>
+          <div class="hit-bar"><div class="fill" style="width:${((s.steady_hit_ratio || 0) * 100).toFixed(1)}%; background:${(s.steady_hit_ratio || 0) > 0.5 ? 'var(--green)' : ((s.steady_hit_ratio || 0) > 0 ? 'var(--amber)' : 'var(--text-dim)')};"></div></div>
+          <span class="cache-dot" title="${csTitle}">${csIcon}</span>
+        </span>
+        <span class="s-cost">${actualCost}<br><span class="saved">省 ${savedCost}</span></span>
+        <span class="s-tokens">in ${fmtNum(s.total_input_tokens)}<br>read ${fmtNum(s.total_cache_read_tokens)}<br>out ${fmtNum(s.total_output_tokens)}</span>
+        <span class="s-reqs">${s.total_requests}</span>
+        <span class="s-actions">
+          <button class="btn-edit" data-id="${esc(s.id)}" data-name="${esc(s.name)}" data-model="${esc(s.model)}" title="编辑">✎</button>
+          <button class="btn-del" data-id="${esc(s.id)}" data-name="${esc(s.name)}" title="删除">✕</button>
+        </span>
+      </div>`;
+    });
+
+    // Total row
+    const aggSteadyPct = ((agg.steady_hit_ratio || 0) * 100).toFixed(1) + '%';
+    const aggFirstRoundPct = ((agg.first_round_hit_ratio || 0) * 100).toFixed(0) + '%';
+    const cur = agg.currency === 'CNY' ? '¥' : '$';
+    const aggActual = cur + (agg.actual_cost || 0).toFixed(4);
+    const aggSaved = cur + (agg.cost_saved || 0).toFixed(4);
+    html += `<div class="total-row">
+      <span class="t-label">合计 (${sessions.length} 会话)</span>
+      <span class="t-val"></span><span class="t-val"></span>
+      <span class="t-val green" title="稳态命中率">${aggSteadyPct}<br><span style="font-size:10px;color:var(--text-dim);font-weight:400;">首轮 ${aggFirstRoundPct}</span></span>
+      <span class="t-val">${aggActual}<br><span class="saved" style="color:var(--green);font-size:10px;">省 ${aggSaved}</span></span>
+      <span class="t-val amber">in ${fmtNum(agg.total_input_tokens)}<br>read ${fmtNum(agg.total_cache_read_tokens)}<br>out ${fmtNum(agg.total_output_tokens)}</span>
+      <span class="t-val">${agg.total_requests}</span>
+      <span></span>
+    </div>`;
+
+    table.innerHTML = html;
+    table.querySelectorAll('.btn-del').forEach(btn => {
+      btn.addEventListener('click', () => deleteSession(btn.dataset.id, btn.dataset.name));
+    });
+    table.querySelectorAll('.btn-edit').forEach(btn => {
+      btn.addEventListener('click', () => openEditModal(btn.dataset.id, btn.dataset.name, btn.dataset.model));
+    });
+  }
+
+  function renderAddViewSessions(sessions) {
+    const box = document.getElementById('addViewSessionList');
+    if (!sessions.length) {
+      box.innerHTML = '<div class="empty-state" style="padding:24px;font-size:12px;">尚未添加任何会话 · 使用上方表单添加第一个</div>';
+      return;
+    }
+    let html = sessions.map(s => {
+      const pc = provColor(s.provider);
+      return `<div class="mini-session">
+        <span class="m-name" title="${esc(s.name)}">${esc(s.name)}</span>
+        <span class="m-model" title="${esc(s.model)}">${esc(s.model)}</span>
+        <span class="m-provider"><span class="prov-dot" style="background:${pc};display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:4px;vertical-align:middle;"></span>${esc(s.provider)}</span>
+        <span class="m-reqs">${s.total_requests} 次请求</span>
+      </div>`;
+    }).join('');
+    box.innerHTML = html;
+  }
+
+  function renderLogs(logs) {
+    const box = document.getElementById('logBox');
+    if (!logs.length) {
+      box.innerHTML = '<div class="empty-state" style="padding:28px;">暂无请求 — 添加会话后发送请求即可看到日志</div>';
+      return;
+    }
+    box.innerHTML = logs.map(l => {
+      let hitBadge;
+      if (l.hit === true) hitBadge = '<span class="hit yes">HIT</span>';
+      else if (l.hit === false) hitBadge = '<span class="hit no">MISS</span>';
+      else hitBadge = '<span class="hit stream">STREAM</span>';
+      // 首轮/稳态标签
+      const roundBadge = l.is_first_round
+        ? '<span class="round-tag first" title="首轮（距上次请求>10分钟，冷启动）">首轮</span>'
+        : '<span class="round-tag steady" title="稳态（连续对话中）">稳态</span>';
+      const toks = l.input_tokens > 0
+        ? `in:${l.input_tokens} read:${l.cache_read_tokens} out:${l.output_tokens}`
+        : '-';
+      const statusTxt = l.status ? `<span class="stat">${l.status}</span>` : '<span class="stat">-</span>';
+      const toolTag = l.tool ? `<span class="tool-tag">${esc(l.tool)}</span>` : '';
+      return `<div class="log-row">
+        <span class="ts">${l.timestamp}</span>
+        <span class="sess">${esc(l.session || '-')}${toolTag}</span>
+        ${roundBadge}
+        ${hitBadge}
+        <span class="toks">${toks}</span>
+        ${statusTxt}
+        <span class="time">${l.elapsed}s</span>
+      </div>`;
+    }).join('');
+  }
+
+  function fmtNum(n) {
+    n = n || 0;
+    if (n >= 1000000) return (n / 1000000).toFixed(2) + 'M';
+    if (n >= 10000) return (n / 1000).toFixed(1) + 'k';
+    return n.toLocaleString();
+  }
+
+  function esc(s) {
+    if (s == null) return '';
+    const d = document.createElement('div');
+    d.textContent = String(s);
+    return d.innerHTML;
+  }
+
+  // ── Copy buttons (delegated for dynamic content) ────
+  document.addEventListener('click', (e) => {
+    if (e.target.classList.contains('copy')) {
+      const targetId = e.target.dataset.target;
+      const target = document.getElementById(targetId);
+      if (target) {
+        // Prefer .cc-text content, fallback to clone without copy buttons
+        const txt = target.querySelector('.cc-text');
+        const text = txt ? txt.textContent.trim() : (() => {
+          const clone = target.cloneNode(true);
+          clone.querySelectorAll('.copy').forEach(c => c.remove());
+          return clone.textContent.trim();
+        })();
+        navigator.clipboard.writeText(text).then(() => showToast('已复制'));
+      }
+    }
+    // API Key show/hide toggle
+    if (e.target.classList.contains('toggle-eye')) {
+      const targetId = e.target.dataset.target;
+      const input = document.getElementById(targetId);
+      if (input) {
+        if (input.type === 'password') {
+          input.type = 'text';
+          e.target.textContent = '🙈';
+        } else {
+          input.type = 'password';
+          e.target.textContent = '👁';
+        }
+      }
+    }
+  });
+
+  // ── Enter key submits add form ─────────────────────
+  ['sessionName', 'sessionModel', 'sessionKey'].forEach(id => {
+    document.getElementById(id).addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); document.getElementById('addBtn').click(); }
+    });
+  });
+
+  // ── Clock ───────────────────────────────────────────
+  function updateClock() {
+    const now = new Date();
+    document.getElementById('topbarTime').textContent =
+      now.toLocaleTimeString('zh-CN', { hour12: false });
+  }
+  setInterval(updateClock, 1000);
+  updateClock();
+
+  // ── Start ───────────────────────────────────────────
+  init();
+  pollDashboard();
+  setInterval(pollDashboard, 2000);
+</script>
+
+</body>
+</html>

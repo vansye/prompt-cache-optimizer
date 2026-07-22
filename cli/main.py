@@ -398,7 +398,16 @@ def cmd_stats(args):
         is_hit = metrics.cache_read_input_tokens > 0
         cache_entries.append(CacheEntry(i, metrics, is_hit))
 
-    report = HitRatioCalculator.calculate(cache_entries)
+    # Per-provider pricing (falls back to Anthropic USD estimate)
+    pricing = None
+    if getattr(args, "provider", ""):
+        from optimizer.config import get_config
+        pricing = get_config(args.provider).pricing
+        if pricing is None:
+            print(f"  (no pricing configured for '{args.provider}', "
+                  f"using default Anthropic USD estimate)")
+
+    report = HitRatioCalculator.calculate(cache_entries, pricing=pricing)
 
     print(f"\n  popt stats -- {report.total_requests} requests")
     print(f"  {'='*40}")
@@ -409,7 +418,15 @@ def cmd_stats(args):
     print(f"  {'─'*40}")
     print(f"  Hit ratio:            {report.hit_ratio:.1%}")
     print(f"  Savings ratio:        {report.savings_ratio:.1%}")
-    print(f"  Est. cost saved:      ${report.estimated_cost_saved:.4f}")
+    print(f"  Est. cost saved:      {report.estimated_cost_saved:.4f} "
+          f"{report.currency}")
+
+
+def cmd_gui(args):
+    """Start the web GUI + proxy server."""
+    from cli.gui import run_gui
+    run_gui(host=args.host, port=args.port, model=args.model or "",
+            open_browser=not args.no_browser)
 
 
 # ── Argument parser ─────────────────────────────────────────────────────
@@ -493,6 +510,25 @@ def build_parser() -> argparse.ArgumentParser:
         "stats", help="Analyze cache metrics from log")
     p_stats.add_argument(
         "file", nargs="?", help="JSON lines file (one response per line)")
+    p_stats.add_argument(
+        "--provider", default="",
+        help="Provider name for pricing from providers.json (e.g. deepseek)")
+
+    # gui
+    p_gui = sub.add_parser(
+        "gui", help="Start web GUI + proxy server (same port)")
+    p_gui.add_argument(
+        "--host", default="127.0.0.1",
+        help="Bind address (default: 127.0.0.1)")
+    p_gui.add_argument(
+        "--port", "-p", type=int, default=6123,
+        help="Bind port (default: 6123)")
+    p_gui.add_argument(
+        "--model", "-m", default="",
+        help="Model name (e.g. deepseek-v4-flash, gpt-4o)")
+    p_gui.add_argument(
+        "--no-browser", action="store_true",
+        help="Do not auto-open browser on start")
 
     return parser
 
@@ -511,6 +547,8 @@ def main():
         cmd_run(args)
     elif args.command == "stats":
         cmd_stats(args)
+    elif args.command == "gui":
+        cmd_gui(args)
     else:
         parser.print_help()
 

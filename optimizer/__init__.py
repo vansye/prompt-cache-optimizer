@@ -19,7 +19,8 @@ from typing import Optional
 from .config import get_config, ProviderConfig, register_provider
 from .normalizer import Normalizer
 from .reorderer import Reorderer
-from .aligner import Aligner
+# Reuse the Aligner's estimator so preview() matches actual padding decisions
+from .aligner import Aligner, _prefix_token_count as _count_tokens_est
 from .formatter import Formatter
 from .diagnoser import (
     diagnose,
@@ -91,29 +92,6 @@ def optimize(
     formatted = Formatter(cfg).format(aligned, provider=cfg.name)
 
     return formatted
-
-
-def _estimate_chars(text: str) -> int:
-    """Rough char-to-token estimate (1 token ≈ 4 chars)."""
-    if not isinstance(text, str):
-        return 0
-    return len(text)
-
-
-def _count_tokens_est(messages: list[dict]) -> int:
-    """Count chars for rough token estimation."""
-    total = 0
-    for msg in messages:
-        content = msg.get("content", "")
-        if isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "text":
-                    total += _estimate_chars(block.get("text", ""))
-        elif isinstance(content, str):
-            total += _estimate_chars(content)
-        else:
-            total += _estimate_chars(str(content))
-    return total // 4
 
 
 def preview(messages: list[dict], provider: str = "anthropic") -> dict:

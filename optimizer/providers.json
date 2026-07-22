@@ -11,7 +11,13 @@
         "supports_breakpoints": false,
         "default_model": "deepseek-chat",
         "cache_tag_system": false,
-        "cache_tag_message": false
+        "cache_tag_message": false,
+        "pricing": {
+          "input": 2.0,
+          "cache_read": 0.2,
+          "output": 8.0,
+          "currency": "CNY"
+        }
       }
     },
     {

@@ -146,7 +146,7 @@ v2（当前）：
 4. **Tool_use 保护**：检测到工具调用链时自动切换保守重排
 5. **CLI**：`popt preview / proxy / stats` 命令可用
 6. **本地代理**：透明转发 + SSE 流式透传
-7. **实验证明**：短 prompt 场景下缓存命中率从 0% 提升至 65%（3 轮平均）
+7. **实验证明**：短 prompt 场景下缓存命中率从 0% 提升至 60.4%（稳定轮实测）
 
 ### ❌ 已知问题
 
@@ -167,9 +167,9 @@ v2（当前）：
 
 **现状**：
 ```
-短 prompt（25t）→ padding 到 784t
-                → 98% 命中
-                → 但 padding 是 588t 的无意义重复文本
+短 prompt（14t）→ padding 到 212t
+                → 60.4% 命中
+                → 但 padding 是 ~198t 的无意义重复文本
 ```
 
 **改进方案**：
@@ -180,18 +180,18 @@ v2（当前）：
 **收益**：
 ```
 改进前：
-  request 1: 25t + 588t padding → 100% miss（首次）
-  request 2: 25t + 588t padding → 98% hit
-  context 占用：613t（含 padding）
+  request 1: 14t + 198t padding → 100% miss（首次）
+  request 2: 14t + 198t padding → 60.4% hit
+  context 占用：212t（含 padding）
 
 改进后：
-  request 1: 25t + 588t 通用指令 → 100% miss（首次）
-  request 2: 25t + 588t 通用指令 → 98% hit
-  context 占用：613t（同）
-  额外收益：那 588t 不是浪费的，模型读到了有价值的指令
+  request 1: 14t + 198t 通用指令 → 100% miss（首次）
+  request 2: 14t + 198t 通用指令 → 60.4% hit
+  context 占用：212t（同）
+  额外收益：那 198t 不是浪费的，模型读到了有价值的指令
 ```
 
-**但通盘看**：即使 padding 无意义，对 25t 场景它带来的命中收益远大于 token 浪费。所以改进方向 A 属于**锦上添花**，不是雪中送炭。
+**但通盘看**：即使 padding 无意义，对 14t 场景它带来的命中收益远大于 token 浪费。所以改进方向 A 属于**锦上添花**，不是雪中送炭。
 
 ---
 

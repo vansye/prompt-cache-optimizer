@@ -14,6 +14,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Optional
 
+from .config import PricingInfo
+
 
 # ── Cache Metrics ────────────────────────────────────────────────────────────
 
@@ -24,6 +26,11 @@ class CacheMetrics:
 
     These field names follow the Anthropic API convention.
     OpenAI uses slightly different names; the parser normalizes them.
+
+    Fields are DISJOINT buckets:
+        total input = input_tokens + cache_creation_input_tokens
+                      + cache_read_input_tokens
+    ``input_tokens`` is the fresh (uncached) portion only.
     """
     input_tokens: int = 0
     cache_creation_input_tokens: int = 0
@@ -44,6 +51,7 @@ class CacheReport:
     hit_ratio: float = 0.0
     savings_ratio: float = 0.0
     estimated_cost_saved: float = 0.0
+    currency: str = "USD"
 
     entries: list["CacheEntry"] = field(default_factory=list)
 
@@ -416,7 +424,6 @@ class PrefixDiffer:
 
 
 def parse_usage(response: dict) -> CacheMetrics:
-    # ... (unchanged, see above)
     """Extract cache metrics from an API response.
 
     Handles Anthropic, OpenAI, and DeepSeek response formats.
@@ -439,13 +446,39 @@ def parse_usage(response: dict) -> CacheMetrics:
     prompt_tokens = usage.get("prompt_tokens", 0)
 
     # OpenAI format: prompt_tokens_details.cached_tokens
-    prompt_details = usage.get("prompt_tokens_details", {})
-    openai_cached = prompt_details.get("cached_tokens", 0) if prompt_details else 0
+    prompt_details = usage.get("prompt_tokens_details") or {}
+    openai_cached = prompt_details.get("cached_tokens", 0)
 
     cached_tokens = prompt_cache_hit or openai_cached or 0
+
+    # Field semantics differ across providers — normalize so that
+    #   input_tokens            = non-cached input (must be recomputed, NOT hit)
+    #   cache_creation_input_tokens = newly-written cache (0 if provider doesn't report)
+    #   cache_read_input_tokens = cache hit
+    #
+    # DeepSeek: prompt_tokens is TOTAL input (= prompt_cache_hit_tokens
+    #   + prompt_cache_miss_tokens) — verified against the live API and
+    #   examples/experiment_deepseek.py. Use the reported miss field.
+    # OpenAI:   prompt_tokens is TOTAL input (includes cached), must subtract.
+    if prompt_cache_hit:
+        # DeepSeek: fresh input = miss portion (prefer the reported field)
+        if "prompt_cache_miss_tokens" in usage:
+            input_tokens = prompt_cache_miss
+        else:
+            input_tokens = max(prompt_tokens - prompt_cache_hit, 0)
+        creation_tokens = 0
+    elif openai_cached:
+        # OpenAI: prompt_tokens = total, subtract cached to get miss portion
+        input_tokens = max(prompt_tokens - openai_cached, 0)
+        creation_tokens = 0
+    else:
+        # No cache info at all — prompt_tokens is the full input
+        input_tokens = prompt_tokens
+        creation_tokens = 0
+
     return CacheMetrics(
-        input_tokens=prompt_tokens,
-        cache_creation_input_tokens=prompt_cache_miss or cached_tokens,
+        input_tokens=input_tokens,
+        cache_creation_input_tokens=creation_tokens,
         cache_read_input_tokens=cached_tokens,
         output_tokens=usage.get("completion_tokens", 0),
     )
@@ -487,11 +520,15 @@ class MissAnalyzer:
             Descriptive string explaining the cache outcome.
         """
         if current_metrics.cache_read_input_tokens > 0:
+            # Disjoint buckets: full input = fresh + creation + read
+            total_input = (current_metrics.input_tokens
+                           + current_metrics.cache_creation_input_tokens
+                           + current_metrics.cache_read_input_tokens)
             parts = [
                 f"Cache HIT: read {current_metrics.cache_read_input_tokens} "
                 f"tokens from cache "
                 f"({current_metrics.cache_read_input_tokens
-                   / max(current_metrics.input_tokens, 1) * 100:.0f}% of input)"
+                   / max(total_input, 1) * 100:.0f}% of input)"
             ]
             if prefix_diff:
                 block_count = current_metrics.cache_read_input_tokens // 128
@@ -540,11 +577,16 @@ class HitRatioCalculator:
     """Calculate cache hit ratios across multiple requests."""
 
     @staticmethod
-    def calculate(entries: list[CacheEntry]) -> CacheReport:
+    def calculate(
+        entries: list[CacheEntry],
+        pricing: Optional[PricingInfo] = None,
+    ) -> CacheReport:
         """Aggregate multiple entries into a report.
 
         Args:
             entries: List of cache entries from sequential requests.
+            pricing: Optional provider pricing (per 1M tokens). Falls back
+                    to an Anthropic Sonnet USD estimate when omitted.
 
         Returns:
             Aggregated CacheReport with derived metrics.
@@ -555,18 +597,24 @@ class HitRatioCalculator:
         total_output = sum(e.metrics.output_tokens for e in entries)
         total_requests = len(entries)
 
-        # Hit ratio: cache_read / total_input
-        hit_ratio = total_read / max(total_input, 1)
+        # Fields are disjoint: full prompt input = fresh + creation + read
+        total_prompt = total_input + total_creation + total_read
+
+        # Hit ratio: cache_read / full prompt input
+        hit_ratio = total_read / max(total_prompt, 1)
 
         # Savings ratio: cache_read / (creation + read)
         savings_ratio = total_read / max(total_creation + total_read, 1)
 
-        # Cost estimate (approximate, at Anthropic Sonnet pricing):
-        # Input: $3.00/Mtokens, Cache read: $0.30/Mtokens
-        cached_input_cost = (total_input - total_read) * 3.0 / 1_000_000
-        read_cost = total_read * 0.30 / 1_000_000
-        cost_without_caching = total_input * 3.0 / 1_000_000
-        estimated_cost_saved = cost_without_caching - (cached_input_cost + read_cost)
+        # Cost estimate. Uses provider pricing (per 1M tokens) when given;
+        # otherwise approximates at Anthropic Sonnet pricing
+        # (input $3.00/Mtokens, cache read $0.30/Mtokens).
+        in_price = (pricing.input if pricing else 3.0) / 1_000_000
+        read_price = (pricing.cache_read if pricing else 0.30) / 1_000_000
+        fresh_cost = (total_input + total_creation) * in_price
+        read_cost = total_read * read_price
+        cost_without_caching = total_prompt * in_price
+        estimated_cost_saved = cost_without_caching - (fresh_cost + read_cost)
 
         return CacheReport(
             total_requests=total_requests,
@@ -577,6 +625,7 @@ class HitRatioCalculator:
             hit_ratio=hit_ratio,
             savings_ratio=savings_ratio,
             estimated_cost_saved=estimated_cost_saved,
+            currency=pricing.currency if pricing else "USD",
             entries=entries[:50],  # Keep last 50 entries
         )
 
@@ -589,9 +638,12 @@ def diagnose(response: dict, **context) -> CacheMetrics:
     return parse_usage(response)
 
 
-def report(entries: list[CacheEntry]) -> CacheReport:
+def report(
+    entries: list[CacheEntry],
+    pricing: Optional[PricingInfo] = None,
+) -> CacheReport:
     """Quick shortcut: compute aggregated report."""
-    return HitRatioCalculator.calculate(entries)
+    return HitRatioCalculator.calculate(entries, pricing=pricing)
 
 
 __all__ = [

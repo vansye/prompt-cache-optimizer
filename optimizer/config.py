@@ -20,6 +20,15 @@ from typing import Optional
 
 
 @dataclass
+class PricingInfo:
+    """Pricing information for a provider (per 1M tokens)."""
+    input: float = 0.0        # Input tokens price per 1M
+    cache_read: float = 0.0   # Cache read tokens price per 1M
+    output: float = 0.0       # Output tokens price per 1M
+    currency: str = "USD"     # Currency code
+
+
+@dataclass
 class ProviderConfig:
     """Configuration for a single LLM provider's caching behavior.
 
@@ -32,6 +41,7 @@ class ProviderConfig:
         cache_tag_message: Whether the provider adds cache tags to non-system messages.
         separator: Default segment separator.
         api_format: API protocol format ("openai" or "anthropic").
+        pricing: Token pricing info (per 1M tokens).
     """
     name: str
     cache_threshold: int = 1024
@@ -41,6 +51,7 @@ class ProviderConfig:
     cache_tag_message: bool = False
     separator: str = "\n\n---\n\n"
     api_format: str = "openai"
+    pricing: Optional[PricingInfo] = None
 
 
 @dataclass
@@ -198,10 +209,22 @@ def _build_configs() -> dict[str, ProviderConfig]:
     configs = {}
     for entry in load_providers():
         name = entry["name"]
-        cfg_data = entry.get("config", {})
+        # Copy: pop("pricing") below must not mutate the cached registry
+        cfg_data = dict(entry.get("config", {}))
+        # Parse pricing if present
+        pricing_data = cfg_data.pop("pricing", None)
+        pricing = None
+        if pricing_data:
+            pricing = PricingInfo(
+                input=pricing_data.get("input", 0.0),
+                cache_read=pricing_data.get("cache_read", 0.0),
+                output=pricing_data.get("output", 0.0),
+                currency=pricing_data.get("currency", "USD"),
+            )
         cfg = ProviderConfig(
             name=name,
             api_format=entry.get("api_format", "openai"),
+            pricing=pricing,
             **cfg_data,
         )
         configs[name] = cfg
